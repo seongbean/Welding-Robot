@@ -1,0 +1,8 @@
+# colcon 빌드 결과물
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
