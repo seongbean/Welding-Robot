@@ -27,7 +27,7 @@ class LeaderDriver:
 
 
 class MockDriver(LeaderDriver):
-    def __init__(self, n_joints: int, amplitude: float = 0.2, period: float = 8.0,
+    def __init__(self, n_joints: int, amplitude: float = 0.1, period: float = 8.0,
                  has_aux: bool = True):
         self.n = n_joints
         self.amp = amplitude

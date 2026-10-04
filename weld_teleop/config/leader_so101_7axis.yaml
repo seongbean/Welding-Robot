@@ -17,6 +17,8 @@ leader_state_node:
     signs: [1, 1, 1, 1, 1, 1]
     aux_servo_id: 7                           # TODO: 그리퍼 서보 ID 확인
     aux_range: [0, 4095]
+    # --- driver: mock (test_mode) ---
+    mock_amplitude: 0.1                       # rad. 0.2면 리더 TCP가 ~30cm 움직여 팔로워가 관절 리밋에 걸림
     # --- driver: lerobot ---
     lerobot_id: my_leader                     # TODO: lerobot-calibrate 때 사용한 --teleop.id
     lerobot_keys: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_yaw, wrist_roll]  # TODO: lerobot action 키 이름과 대조

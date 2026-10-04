@@ -24,6 +24,7 @@ class LeaderStateNode(Node):
         self.declare_parameter('signs', [1])
         self.declare_parameter('aux_servo_id', -1)           # -1 = 사용 안 함
         self.declare_parameter('aux_range', [0, 4095])
+        self.declare_parameter('mock_amplitude', 0.1)        # driver=mock 사인파 진폭 [rad]
         # driver=lerobot 전용
         self.declare_parameter('lerobot_id', 'my_leader')        # lerobot-calibrate 때 쓴 --teleop.id
         self.declare_parameter('lerobot_keys', [''])              # lerobot 모터 이름 (URDF joint 순서대로)
@@ -45,7 +46,8 @@ class LeaderStateNode(Node):
                 aux_id=aux_id if aux_id >= 0 else None,
                 aux_range=tuple(p('aux_range')))
         else:
-            self.driver = MockDriver(len(self.joint_names), has_aux=aux_id >= 0)
+            self.driver = MockDriver(len(self.joint_names), amplitude=float(p('mock_amplitude')),
+                                     has_aux=aux_id >= 0)
 
         self.pub_js = self.create_publisher(JointState, '/leader/joint_states', 10)
         self.pub_aux = self.create_publisher(Float64, '/leader/aux', 10)
