@@ -1,0 +1,16 @@
+follower_ik_node:
+  ros__parameters:
+    joint_names: [joint0, joint1, joint2, joint3, joint4, joint5]
+    ee_frame: tcp                    # opti3.urdf: link6 플랜지에 오프셋 0
+    tool_xyz: [0.0, 0.0, 0.0]        # TODO: 용접 토치 팁 오프셋 실측값
+    tool_rpy: [0.0, 0.0, 0.0]
+    base_frame: link0
+    joint_state_topic: /joint_states
+    rate_hz: 100.0
+    max_joint_step: 0.01             # rad/cycle (100Hz면 약 1 rad/s)
+    ik_tolerance: 0.001
+    dry_run: true                    # 실기 명령 전 반드시 RViz로 확인
+    output_type: joint_trajectory    # | float64_array
+    command_topic: /joint_trajectory_controller/joint_trajectory   # TODO: 실기 컨트롤러 확인
+    loopback: false
+    initial_q: [0.0, 0.0, -1.57, 0.0, -1.57, 0.0]   # URDF ros2_control initial_value 기준

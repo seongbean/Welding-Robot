@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>weld_teleop</name>
+  <version>0.1.0</version>
+  <description>SO-101 leader → Indy opti3 end-effector teleoperation for welding imitation learning</description>
+  <maintainer email="seongbin55228295@gmail.com">Seongbin</maintainer>
+  <license>TODO</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>pinocchio</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

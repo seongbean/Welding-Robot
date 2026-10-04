@@ -1,0 +1,12 @@
+ee_mapping_node:
+  ros__parameters:
+    rate_hz: 100.0
+    position_scale: 1.0                    # SO-101 작업영역이 작으므로 1.5~2.0도 고려
+    leader_to_follower_rpy: [0.0, 0.0, 0.0] # 두 베이스의 축 방향 차이
+    orientation_mode: full                  # 5관절 리더면 position_only 권장
+    max_linear_step: 0.002                  # m/cycle (100Hz → 0.2 m/s)
+    max_angular_step: 0.02                  # rad/cycle
+    workspace_min: [-0.6, -0.6, 0.05]       # TODO: 실제 용접 지그 기준으로 설정
+    workspace_max: [0.6, 0.6, 0.8]
+    auto_clutch: false
+    follower_frame: link0

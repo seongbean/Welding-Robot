@@ -1,0 +1,25 @@
+# 기업 개조형 SO-101 (팔 6관절 + 그리퍼로 추정) — 본 운용 프로필
+# TODO(기업 확인 필요):
+#   - 개조형 URDF (추가된 관절의 위치/축/링크 길이)
+#   - 추가 관절 이름과 서보 ID, 서보 모델
+#   - 7번째 축이 정말 팔 관절인지(그리퍼 포함 7개인지)
+leader_state_node:
+  ros__parameters:
+    driver: mock
+    joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_yaw_added, wrist_roll]
+    rate_hz: 100.0
+    port: /dev/ttyACM0
+    baudrate: 1000000
+    servo_ids: [1, 2, 3, 4, 5, 6]
+    offsets: [2048, 2048, 2048, 2048, 2048, 2048]
+    signs: [1, 1, 1, 1, 1, 1]
+    aux_servo_id: 7
+    aux_range: [0, 4095]
+
+leader_fk_node:
+  ros__parameters:
+    joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_yaw_added, wrist_roll]
+    ee_frame: gripper_frame_link
+    tool_xyz: [0.0, 0.0, 0.0]
+    tool_rpy: [0.0, 0.0, 0.0]
+    base_frame: leader_base
