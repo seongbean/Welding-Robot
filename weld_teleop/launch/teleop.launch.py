@@ -31,8 +31,8 @@ def _setup(context):
     if not leader_urdf:
         raise RuntimeError('leader_profile:=5dof 에서는 leader_urdf:=.../so101_new_calib.urdf 를 지정하세요')
 
-    follower_urdf = lc('follower_urdf') or os.path.join(
-        get_package_share_directory('indy_description'), 'urdf_files', 'opti3.urdf')
+    # indy_description은 urdf_files/를 설치하지 않으므로 패키지에 복사해 둔 opti3.urdf를 쓴다
+    follower_urdf = lc('follower_urdf') or os.path.join(share, 'urdf', 'opti3.urdf')
 
     return [
         Node(package='weld_teleop', executable='leader_state_node',
@@ -54,7 +54,7 @@ def generate_launch_description():
         DeclareLaunchArgument('leader_urdf', default_value='',
                               description='리더 URDF 절대경로 (7axis는 비우면 패키지의 so102.urdf)'),
         DeclareLaunchArgument('follower_urdf', default_value='',
-                              description='비우면 indy_description의 opti3.urdf'),
+                              description='비우면 패키지의 urdf/opti3.urdf (indy_description 복사본)'),
         DeclareLaunchArgument('test_mode', default_value='false',
                               description='true: mock 리더 + 자동 클러치 + loopback 팔로워'),
         OpaqueFunction(function=_setup),

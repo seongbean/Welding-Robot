@@ -31,7 +31,8 @@ SO-101(개조형) 리더 → Neuromeka Indy opti3 팔로워, **엔드이펙터(T
 sudo apt install ros-jazzy-pinocchio      # 또는 pip install pin
 pip install feetech-servo-sdk             # 실기 리더(Feetech)만 필요
 ```
-opti3 URDF는 `indy-ros2`(jazzy-indyDCP3)의 `indy_description`을 같은 워크스페이스에서 빌드하면 자동으로 찾습니다.
+opti3 URDF는 `indy-ros2`(jazzy-indyDCP3)의 `indy_description/urdf_files/opti3.urdf`를 `urdf/opti3.urdf`로 복사해 두었습니다
+(`indy_description`은 `urdf_files/`를 설치하지 않음). 다른 파일을 쓰려면 `follower_urdf:=...`로 지정하세요.
 
 ## 실행
 
