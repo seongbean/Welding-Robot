@@ -24,12 +24,21 @@ class LeaderStateNode(Node):
         self.declare_parameter('signs', [1])
         self.declare_parameter('aux_servo_id', -1)           # -1 = 사용 안 함
         self.declare_parameter('aux_range', [0, 4095])
+        # driver=lerobot 전용
+        self.declare_parameter('lerobot_id', 'my_leader')        # lerobot-calibrate 때 쓴 --teleop.id
+        self.declare_parameter('lerobot_keys', [''])              # lerobot 모터 이름 (URDF joint 순서대로)
+        self.declare_parameter('signs_f', [1.0])
+        self.declare_parameter('offsets_rad', [0.0])
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.joint_names = list(p('joint_names'))
         aux_id = int(p('aux_servo_id'))
 
-        if p('driver') == 'feetech':
+        if p('driver') == 'lerobot':
+            from .leader_drivers import LerobotDriver
+            self.driver = LerobotDriver(p('port'), p('lerobot_id'), list(p('lerobot_keys')),
+                                        list(p('signs_f')), list(p('offsets_rad')))
+        elif p('driver') == 'feetech':
             self.driver = FeetechDriver(
                 p('port'), int(p('baudrate')), list(p('servo_ids')),
                 list(p('offsets')), list(p('signs')),
@@ -47,7 +56,7 @@ class LeaderStateNode(Node):
     def _tick(self):
         try:
             q, aux = self.driver.read()
-        except IOError as e:
+        except (IOError, KeyError) as e:
             self.get_logger().warn(str(e), throttle_duration_sec=1.0)
             return
         msg = JointState()

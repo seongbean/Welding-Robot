@@ -6,8 +6,7 @@
       leader_urdf:=/path/to/so101.urdf
 
   # 실기 (dry_run은 follower_opti3.yaml에서 false로 바꾼 뒤)
-  ros2 launch weld_teleop teleop.launch.py leader_profile:=7axis \
-      leader_urdf:=/path/to/so101_7axis.urdf
+  ros2 launch weld_teleop teleop.launch.py leader_profile:=7axis   # urdf/so102.urdf 자동 사용
 """
 import os
 
@@ -26,6 +25,12 @@ def _setup(context):
     leader_yaml = cfg(f'leader_so101_{lc("leader_profile")}.yaml')
     test = lc('test_mode').lower() == 'true'
 
+    profile = lc('leader_profile')
+    leader_urdf = lc('leader_urdf') or (
+        os.path.join(share, 'urdf', 'so102.urdf') if profile == '7axis' else '')
+    if not leader_urdf:
+        raise RuntimeError('leader_profile:=5dof 에서는 leader_urdf:=.../so101_new_calib.urdf 를 지정하세요')
+
     follower_urdf = lc('follower_urdf') or os.path.join(
         get_package_share_directory('indy_description'), 'urdf_files', 'opti3.urdf')
 
@@ -33,7 +38,7 @@ def _setup(context):
         Node(package='weld_teleop', executable='leader_state_node',
              parameters=[leader_yaml] + ([{'driver': 'mock'}] if test else [])),
         Node(package='weld_teleop', executable='leader_fk_node',
-             parameters=[leader_yaml, {'urdf_path': lc('leader_urdf')}]),
+             parameters=[leader_yaml, {'urdf_path': leader_urdf}]),
         Node(package='weld_teleop', executable='ee_mapping_node',
              parameters=[cfg('mapping.yaml')] + ([{'auto_clutch': True}] if test else [])),
         Node(package='weld_teleop', executable='follower_ik_node',
@@ -46,7 +51,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('leader_profile', default_value='7axis',
                               description='5dof | 7axis'),
-        DeclareLaunchArgument('leader_urdf', description='리더 URDF 절대경로'),
+        DeclareLaunchArgument('leader_urdf', default_value='',
+                              description='리더 URDF 절대경로 (7axis는 비우면 패키지의 so102.urdf)'),
         DeclareLaunchArgument('follower_urdf', default_value='',
                               description='비우면 indy_description의 opti3.urdf'),
         DeclareLaunchArgument('test_mode', default_value='false',

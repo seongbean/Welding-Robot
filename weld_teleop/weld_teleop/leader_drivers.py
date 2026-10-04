@@ -43,6 +43,46 @@ class MockDriver(LeaderDriver):
         return q, aux
 
 
+class LerobotDriver(LeaderDriver):
+    """lerobot의 SO101Leader를 그대로 사용 (lerobot 캘리브레이션 파일 재사용).
+
+    - use_degrees=True(현재 lerobot 기본값): 팔 관절 = (raw - 캘리브레이션 범위 중앙) * 360/4095 [deg]
+      → 0도 = 캘리브레이션 때 기록한 범위의 중앙. so101_new_calib.urdf의 영점 정의(범위 중앙)와 같은 규약.
+    - gripper는 RANGE_0_100 → /100 해서 aux(0~1)로 내보냄.
+    - signs/offsets_rad: 실제 팔과 URDF 사이의 방향·영점 잔차 보정 (실측으로 결정).
+    """
+
+    def __init__(self, port: str, calib_id: str, joint_keys: list[str],
+                 signs: list[float], offsets_rad: list[float],
+                 aux_key: str | None = 'gripper'):
+        from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
+        if not (len(joint_keys) == len(signs) == len(offsets_rad)):
+            raise ValueError("joint_keys / signs / offsets_rad 길이가 다름")
+        self.leader = SO101Leader(SO101LeaderConfig(port=port, id=calib_id, use_degrees=True))
+        self.leader.connect(calibrate=False)  # 기존 캘리브레이션 파일 사용, 없으면 lerobot이 에러
+        if not self.leader.is_calibrated:
+            raise RuntimeError(f"lerobot 캘리브레이션이 없음 (id={calib_id}). lerobot-calibrate 먼저 실행")
+        self.keys = [f'{k}.pos' for k in joint_keys]
+        self.signs = np.asarray(signs, dtype=float)
+        self.offsets = np.asarray(offsets_rad, dtype=float)
+        self.aux_key = f'{aux_key}.pos' if aux_key else None
+
+    def read(self):
+        try:
+            a = self.leader.get_action()
+        except Exception as e:  # lerobot 내부 통신 오류를 IOError로 통일
+            raise IOError(f'lerobot get_action 실패: {e}') from e
+        missing = [k for k in self.keys if k not in a]
+        if missing:
+            raise KeyError(f'lerobot action에 없는 키: {missing} (보유 키: {list(a)})')
+        q = np.radians([a[k] for k in self.keys]) * self.signs + self.offsets
+        aux = a[self.aux_key] / 100.0 if self.aux_key and self.aux_key in a else None
+        return q, aux
+
+    def close(self):
+        self.leader.disconnect()
+
+
 class FeetechDriver(LeaderDriver):
     ADDR_PRESENT_POSITION = 56  # STS3215
     LEN_PRESENT_POSITION = 2

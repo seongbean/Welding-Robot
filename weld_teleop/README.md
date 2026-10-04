@@ -45,7 +45,7 @@ ros2 topic echo /follower/ik_preview
 
 # 2) 실기 (opti3 bringup을 먼저 띄운 뒤)
 ros2 launch indy_driver indy_bringup.launch.py indy_type:=opti3 indy_ip:=192.168.x.x
-ros2 launch weld_teleop teleop.launch.py leader_profile:=7axis leader_urdf:=/abs/path/so101_7axis.urdf
+ros2 launch weld_teleop teleop.launch.py leader_profile:=7axis   # so102.urdf 자동 사용
 ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 ```
 
@@ -53,7 +53,8 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 
 ## 확인/결정이 필요한 항목 (TODO)
 
-- [ ] **개조형 7축 정보 (기업):** URDF, 추가된 관절의 이름·서보 ID·서보 모델, 7번째 축이 팔 관절인지 여부
+- [x] 개조형 URDF 수령 (`urdf/so102.urdf`, wrist_yaw 추가된 팔 6관절 + 그리퍼)
+- [ ] **SO-102 잔여 확인:** wrist_yaw 서보 ID, lerobot 모터 이름, URDF 임시 가정(yaw→roll 오프셋 부호·yaw 회전 방향·yaw 리밋)
 - [ ] **SO-101 URDF의 joint/frame 이름:** 현재 config 값은 추정값이므로 실제 파일과 대조
 - [ ] **리더 캘리브레이션:** URDF 영점 자세에서의 tick 값으로 `offsets`, 회전 방향은 `signs`에 기록
 - [ ] **opti3 명령 인터페이스:** `ros2 control list_controllers`로 컨트롤러 이름을 확인한 뒤 `command_topic`/`output_type` 설정. 대안으로 indy_moveit `servo_mode`(MoveIt Servo)에 포즈 명령을 보내는 방식도 있음

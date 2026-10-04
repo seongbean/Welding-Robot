@@ -1,9 +1,9 @@
 # 기본 SO-101 (팔 5관절 + 그리퍼) — 파이프라인 검증용
-# TODO: 아래 joint/frame 이름은 TheRobotStudio SO-ARM100 저장소의 so101 URDF 기준 추정값.
-#       실제 사용하는 URDF를 열어 이름을 확인할 것.
+# URDF: SO-ARM100/Simulation/SO101/so101_new_calib.urdf (영점 = 관절 범위 중앙, lerobot DEGREES 모드와 같은 규약)
+#       joint/frame 이름은 해당 파일에서 확인 완료.
 leader_state_node:
   ros__parameters:
-    driver: mock               # 실기: feetech
+    driver: mock               # 실기: lerobot (권장) | feetech
     joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
     rate_hz: 100.0
     port: /dev/ttyACM0
@@ -13,6 +13,11 @@ leader_state_node:
     signs: [1, 1, 1, 1, 1]
     aux_servo_id: 6            # 그리퍼 서보 (용도 미정, -1이면 비활성)
     aux_range: [0, 4095]
+    # --- driver: lerobot ---
+    lerobot_id: my_leader      # TODO: lerobot-calibrate 때 사용한 --teleop.id
+    lerobot_keys: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
+    signs_f: [1.0, 1.0, 1.0, 1.0, 1.0]       # TODO: 실측 (RViz에서 실제 팔과 방향 비교)
+    offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0]   # TODO: 실측 (캘리브레이션 범위 중앙 ≠ URDF 범위 중앙인 만큼)
 
 leader_fk_node:
   ros__parameters:
