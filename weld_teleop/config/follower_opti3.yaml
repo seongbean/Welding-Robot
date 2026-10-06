@@ -2,8 +2,10 @@ follower_ik_node:
   ros__parameters:
     joint_names: [joint0, joint1, joint2, joint3, joint4, joint5]
     ee_frame: tcp                    # opti3.urdf: link6 플랜지에 오프셋 0
-    tool_xyz: [0.0, 0.0, 0.0]        # TODO: 용접 토치 팁 오프셋 실측값
-    tool_rpy: [0.0, 0.0, 0.0]
+    # 용접 토치 팁(와이어 끝): Isaac Sim 장면 posco_torch.usd의 /World/indy/link6/tcp/weld_tip 값 (CAD 기준)
+    # rpy는 팁 z축을 토치 방향(tcp 기준 y축 45°)에 맞춤. TODO: 실물 와이어 돌출 길이 실측 확인
+    tool_xyz: [0.1876, 0.0, 0.368]
+    tool_rpy: [0.0, 0.7854, 0.0]
     base_frame: link0
     joint_state_topic: /joint_states
     rate_hz: 100.0
