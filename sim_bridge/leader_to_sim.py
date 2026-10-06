@@ -106,8 +106,8 @@ def main():
                 if msg is not None:
                     if loop.stepper.q_meas is None:   # 첫 실측: 자세 확인용 출력
                         tip = loop.follower_kin.fk(msg['q']).translation
-                        print(f'\nIsaac Sim 첫 실측 [deg]: {[round(math.degrees(v), 1) for v in msg["q"]]}'
-                              f'  토치 팁 [m]: {[round(v, 3) for v in tip]}')
+                        print(f'\nIsaac Sim 첫 실측 [deg]: {[round(math.degrees(float(v)), 1) for v in msg["q"]]}'
+                              f'  토치 팁 [m]: {[round(float(v), 3) for v in tip]}')
                         out = loop.stepper.out_of_limits(msg['q'])
                         if out:
                             print(f'경고: URDF 리밋 밖 관절 {out} → 장면과 URDF의 관절 영점/범위 확인 필요')
