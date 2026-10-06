@@ -15,6 +15,7 @@ config는 ROS 노드와 같은 파일(weld_teleop/config/*.yaml)을 쓴다.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import socket
 import sys
@@ -103,6 +104,13 @@ def main():
                     break
                 msg = decode(data, n_follower)
                 if msg is not None:
+                    if loop.stepper.q_meas is None:   # 첫 실측: 자세 확인용 출력
+                        tip = loop.follower_kin.fk(msg['q']).translation
+                        print(f'\nIsaac Sim 첫 실측 [deg]: {[round(math.degrees(v), 1) for v in msg["q"]]}'
+                              f'  토치 팁 [m]: {[round(v, 3) for v in tip]}')
+                        out = loop.stepper.out_of_limits(msg['q'])
+                        if out:
+                            print(f'경고: URDF 리밋 밖 관절 {out} → 장면과 URDF의 관절 영점/범위 확인 필요')
                     loop.on_measured(msg['q'], now)
             try:
                 q_leader, aux = driver.read()

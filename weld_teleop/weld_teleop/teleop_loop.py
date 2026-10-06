@@ -49,7 +49,7 @@ class TeleopLoop:
     @property
     def status(self) -> str:
         s = self.stepper
-        return f'{s.status} {s.detail}' if s.status in ('tracking_error', 'ik_failed') else s.status
+        return f'{s.status} {s.detail}' if s.status in ('tracking_error', 'ik_failed', 'out_of_limits') else s.status
 
 
 # ----------------------------------------------------------------------- config

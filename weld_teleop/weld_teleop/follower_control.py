@@ -4,6 +4,7 @@
 - 추종 오차: 실측 관절각과 직전 명령의 차이(관절별 최대)가 max_track_error를 넘으면
   명령을 보내지 않고 명령 기준을 실측값으로 재동기화한다.
   (비상정지·충돌 등으로 로봇이 멈춘 동안 명령만 앞서 나가다가, 풀리는 순간 튀는 것을 방지)
+- 리밋 밖 실측: 실측 관절각이 URDF 리밋을 벗어나면 명령을 보내지 않는다(IK가 수렴할 수 없음).
 - 입력 끊김: 목표 포즈나 관절 상태가 input_timeout 초 넘게 갱신되지 않으면 명령을 보내지 않는다.
   (클러치 OFF로 목표가 끊겨도 같은 방식으로 정지)
 loopback(실측 없음)에서는 관절 상태 관련 검사를 건너뛴다.
@@ -48,6 +49,13 @@ class FollowerStepper:
         self.target = T
         self.t_target = t
 
+    def out_of_limits(self, q, tol: float = 1e-3) -> str:
+        """URDF 리밋을 벗어난 관절 설명 ('' = 모두 리밋 안)."""
+        k = self.kin
+        bad = [f'{n}={v:.2f}' for n, v, lo, hi in zip(k.joint_names, q, k.lower, k.upper)
+               if v < lo - tol or v > hi + tol]
+        return ', '.join(bad)
+
     def step(self, t: float) -> np.ndarray | None:
         """보낼 관절 명령, 또는 보내지 않을 때 None (사유는 self.status)."""
         if self.q_cmd is None or self.target is None:
@@ -56,6 +64,11 @@ class FollowerStepper:
         if self.use_measured:
             if self.t_meas is None or t - self.t_meas > self.timeout:
                 self.status = 'joint_state_timeout'
+                return None
+            out = self.out_of_limits(self.q_meas)
+            if out:
+                # URDF 리밋 밖 실측값에서는 IK가 리밋으로 잘려 수렴하지 못함 (시뮬/실기와 URDF 불일치 신호)
+                self.status, self.detail = 'out_of_limits', out
                 return None
             err = float(np.max(np.abs(self.q_cmd - self.q_meas)))
             if err > self.max_track_error:

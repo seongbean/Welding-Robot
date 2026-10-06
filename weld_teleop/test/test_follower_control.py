@@ -105,3 +105,14 @@ def test_loopback_skips_measured_checks(kin):
     s.set_initial(Q0)
     s.on_target(target_near(kin), 10.0)
     assert s.step(10.0) is not None and s.status == 'ok'
+
+
+def test_stops_when_measured_outside_urdf_limits(kin):
+    s = make(kin)
+    q = Q0.copy()
+    q[4] = kin.upper[4] + 0.3   # 시뮬/실기 관절이 URDF 리밋 밖
+    s.on_measured(q, 0.0)
+    s.on_target(target_near(kin), 0.0)
+    assert s.step(0.0) is None
+    assert s.status == 'out_of_limits' and 'wrist_yaw' in s.detail
+    assert s.out_of_limits(Q0) == ''
