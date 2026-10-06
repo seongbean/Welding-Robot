@@ -18,7 +18,7 @@ leader_state_node:
     offsets: [2046, 2030, 2142, 2050, 1973, 2012]   # 2026-10-06 영점 자세 snapshot (그리퍼 ID 7은 2604)
     signs: [1, 1, 1, 1, 1, 1]                 # 2026-10-06 확인: 6관절 모두 서보 tick 증가 = URDF + 방향
     aux_servo_id: 7                           # 그리퍼, 실기 확인 완료
-    aux_range: [0, 4095]
+    aux_range: [2056, 3215]                   # 그리퍼 닫힘→0, 열림→1 (2026-10-06 snapshot)
     # --- driver: lerobot (SO-102에서는 사용 불가, 위 주석) ---
     lerobot_id: my_leader                     # TODO: lerobot-calibrate 때 사용한 --teleop.id
     lerobot_keys: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_yaw, wrist_roll]  # TODO: lerobot action 키 이름과 대조
