@@ -137,3 +137,14 @@ def test_stops_when_measured_outside_urdf_limits(kin):
     assert s.step(0.0) is None
     assert s.status == 'out_of_limits' and 'wrist_yaw' in s.detail
     assert s.out_of_limits(Q0) == ''
+
+
+def test_approx_solution_within_accept_error_still_moves(kin):
+    import pinocchio as pin
+    s = FollowerStepper(kin, max_joint_step=0.01, input_timeout=0.2, ik_accept_error=10.0)
+    s.on_measured(Q0, 0.0)
+    s.on_target(pin.SE3(np.eye(3), np.array([5.0, 0.0, 0.0])), 0.0)   # 도달 불가지만 허용 오차 안
+    q = s.step(DT)
+    assert q is not None and s.status == 'approx'
+    assert 0 < np.max(np.abs(q - Q0)) <= 0.01 + 1e-12
+

@@ -7,6 +7,8 @@ Isaac Sim 5.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으�
 - 시작 자세(--initial-q)는 토치가 로봇 앞에서 아래를 향하는 자세(관절 0, -30, 100, 0, 50, 0도).
   follower_opti3.yaml의 initial_q(토치 팁이 로봇 뒤 바닥 근처)보다 사방으로 움직일 여유가 크다.
   목표가 안 오면 마지막 목표를 유지한다.
+- 리더가 가리키는 목표 포즈(토치 팁)를 축 마커로 표시한다. 토치 팁(weld_tip)과 마커가 같이 움직이면
+  매핑이 맞는 것이다. 마커 z축(파랑)이 토치 방향.
 - 리더 쪽은 leader_to_sim.py. 종료는 창 닫기 또는 Ctrl+C.
 """
 from __future__ import annotations
@@ -26,6 +28,8 @@ ap.add_argument('--reply', default='127.0.0.1:9871', help='실측 관절값 보�
 ap.add_argument('--kp', type=float, default=1e4)
 ap.add_argument('--kd', type=float, default=1e3)
 ap.add_argument('--headless', action='store_true')
+ap.add_argument('--base-link', default='/World/indy/link0', help='URDF base_frame(link0)에 해당하는 prim')
+ap.add_argument('--no-marker', action='store_true', help='목표 포즈 마커 끄기')
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -37,6 +41,8 @@ from isaacsim.core.api import World  # noqa: E402
 from isaacsim.core.prims import SingleArticulation  # noqa: E402
 from isaacsim.core.utils.stage import open_stage  # noqa: E402
 from isaacsim.core.utils.types import ArticulationAction  # noqa: E402
+import omni.usd  # noqa: E402
+from pxr import Gf, Usd, UsdGeom  # noqa: E402
 
 
 def addr(s: str) -> tuple[str, int]:
@@ -68,7 +74,56 @@ def setup() -> tuple[list[int], np.ndarray]:
     return idx, target
 
 
+MARKER_ROOT = '/World/teleop_marker'
+
+
+def make_marker(stage):
+    """리더가 가리키는 토치 팁 목표 포즈를 보여 줄 축 마커 (x 빨강, y 초록, z 파랑 = 토치 방향).
+
+    목표는 opti3.urdf의 link0 기준이므로 마커 부모를 link0의 월드 자세에 맞춘다. 물리 없음(표시 전용).
+    """
+    base = stage.GetPrimAtPath(args.base_link)
+    if base.IsValid():
+        base_m = UsdGeom.Xformable(base).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    else:
+        print(f'[receiver] 경고: {args.base_link} 없음, 마커를 월드 원점 기준으로 표시')
+        base_m = Gf.Matrix4d(1.0)
+    UsdGeom.Xform.Define(stage, MARKER_ROOT).AddTransformOp().Set(base_m)
+    frame = UsdGeom.Xform.Define(stage, MARKER_ROOT + '/target')
+    op = frame.AddTransformOp()
+    for i, (axis, color) in enumerate((('X', (1, 0, 0)), ('Y', (0, 1, 0)), ('Z', (0, 0, 1)))):
+        c = UsdGeom.Cylinder.Define(stage, f'{MARKER_ROOT}/target/{axis.lower()}')
+        c.CreateAxisAttr(axis)
+        c.CreateRadiusAttr(0.003)
+        c.CreateHeightAttr(0.06)
+        c.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        offset = [0.0, 0.0, 0.0]
+        offset[i] = 0.03
+        c.AddTranslateOp().Set(Gf.Vec3d(*offset))
+    tip = UsdGeom.Sphere.Define(stage, MARKER_ROOT + '/target/tip')
+    tip.CreateRadiusAttr(0.006)
+    tip.CreateDisplayColorAttr([Gf.Vec3f(1, 0.8, 0)])
+    UsdGeom.Imageable(frame.GetPrim()).MakeInvisible()   # 첫 목표가 올 때까지 숨김
+    return frame, op
+
+
+marker_shown = False
+
+
+def set_marker(xyzquat) -> None:
+    global marker_shown
+    x, y, z, qx, qy, qz, qw = (float(v) for v in xyzquat)
+    m = Gf.Matrix4d(1.0)
+    m.SetRotateOnly(Gf.Quatd(qw, qx, qy, qz))
+    m.SetTranslateOnly(Gf.Vec3d(x, y, z))
+    marker_op.Set(m)
+    if not marker_shown:
+        UsdGeom.Imageable(marker.GetPrim()).MakeVisible()
+        marker_shown = True
+
+
 idx, target = setup()
+marker, marker_op = (None, None) if args.no_marker else make_marker(omni.usd.get_context().get_stage())
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(addr(args.listen))
 sock.setblocking(False)
@@ -89,12 +144,16 @@ try:
             except (BlockingIOError, ConnectionResetError):
                 break
             try:
-                q = np.asarray(json.loads(data.decode())['q'], dtype=float)
-            except (ValueError, KeyError, TypeError):
+                msg = json.loads(data.decode())
+                q = np.asarray(msg['q'], dtype=float)
+                tgt = np.asarray(msg.get('target', []), dtype=float)
+            except (ValueError, KeyError, TypeError, AttributeError):
                 continue
             if q.shape == (len(idx),) and np.all(np.isfinite(q)):
                 target[idx] = q
                 n_rx += 1
+            if marker is not None and tgt.shape == (7,) and np.all(np.isfinite(tgt)):
+                set_marker(tgt)
         robot.apply_action(ArticulationAction(joint_positions=target))
         world.step(render=not args.headless)
         if world.is_playing():

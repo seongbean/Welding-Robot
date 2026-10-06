@@ -26,6 +26,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(REPO, 'weld_teleop')
 sys.path.insert(0, PKG)
 
+from weld_teleop.kinematics import se3_to_xyzquat  # noqa: E402
 from weld_teleop.leader_drivers import FeetechDriver, MockDriver  # noqa: E402
 from weld_teleop.teleop_loop import build_loop, decode, encode, ros_params  # noqa: E402
 
@@ -120,7 +121,9 @@ def main():
                 q_leader = None
             q = loop.tick(now, q_leader, clutch.is_set())
             if q is not None:
-                sock.sendto(encode(q), dest)
+                T = loop.target   # Isaac Sim 마커 표시용 목표 포즈
+                extra = {'target': se3_to_xyzquat(T).tolist()} if T is not None else {}
+                sock.sendto(encode(q, **extra), dest)
 
             if now - t_print > 0.1:
                 g = f'{aux * 100:5.1f}%' if aux is not None else '  -  '
