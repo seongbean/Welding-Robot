@@ -9,6 +9,8 @@ follower_ik_node:
     rate_hz: 100.0
     max_joint_step: 0.01             # rad/cycle (100Hz면 약 1 rad/s)
     ik_tolerance: 0.001
+    max_track_error: 0.1             # rad, 명령-실측 차이가 넘으면 정지 후 실측으로 재동기화
+    input_timeout: 0.2               # s, 목표 포즈·관절 상태가 끊기면 명령 정지
     dry_run: true                    # 실기 명령 전 반드시 RViz로 확인
     output_type: joint_trajectory    # | float64_array
     command_topic: /joint_trajectory_controller/joint_trajectory   # TODO: 실기 컨트롤러 확인
