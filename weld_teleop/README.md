@@ -51,6 +51,10 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 
 `follower_opti3.yaml`의 `dry_run: true`가 기본값입니다. RViz에서 `/follower/ik_preview`로 동작을 확인한 다음에 false로 바꾸세요.
 
+## ROS 없이 Isaac Sim으로 (Windows)
+
+리더 암으로 Isaac Sim 장면의 opti3를 움직이는 방법은 [`sim_bridge/README.md`](../sim_bridge/README.md) 참고. 같은 config와 계산 코드(`teleop_loop.py`)를 쓴다.
+
 ## 테스트
 
 ROS 없이 기구학(FK/IK)과 EE 매핑 계산을 검증합니다. GitHub Actions에서 푸시·PR마다 자동 실행됩니다.
@@ -67,7 +71,8 @@ pytest weld_teleop/test        # 저장소 루트에서
 - [x] 개조형 URDF 수령 (`urdf/so102.urdf`, wrist_yaw 추가된 팔 6관절 + 그리퍼)
 - [x] **SO-102 서보 ID:** pan=1 … roll=6, gripper=7 (`leader_probe.py`로 확인). lerobot은 wrist_yaw를 읽지 못해 feetech 드라이버 사용
 - [x] SO-102 URDF yaw→roll 오프셋 부호: -z로 확정 (2026-10-06 실측)
-- [ ] **SO-102 URDF 임시 가정:** yaw 회전 방향·yaw 리밋 (`so102_urdf_check.py`)
+- [x] SO-102 wrist_yaw 리밋: -73.4~+86.6도 (2026-10-06 실측)
+- [ ] **SO-102 URDF 임시 가정:** yaw 회전 방향 (`so102_urdf_check.py`)
 - [ ] **SO-101 URDF의 joint/frame 이름:** 현재 config 값은 추정값이므로 실제 파일과 대조
 - [x] 리더 캘리브레이션 (SO-102): `offsets`·`signs`·그리퍼 `aux_range` 실측 기록 (2026-10-06)
 - [ ] **opti3 명령 인터페이스:** `ros2 control list_controllers`로 컨트롤러 이름을 확인한 뒤 `command_topic`/`output_type` 설정. 대안으로 indy_moveit `servo_mode`(MoveIt Servo)에 포즈 명령을 보내는 방식도 있음
