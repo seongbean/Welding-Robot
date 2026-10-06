@@ -6,7 +6,6 @@
 # lerobot 드라이버는 쓸 수 없음: lerobot SO101Leader는 모터 6개(ID 5=wrist_roll, 6=gripper)로
 #   고정되어 있어 이 팔에서는 wrist_yaw를 wrist_roll로, wrist_roll을 gripper로 잘못 읽는다.
 # TODO(실측 확인):
-#   - offsets: URDF 영점 자세에서 `leader_probe.py snapshot` 값
 #   - signs: 각 관절 회전 방향 (RViz에서 실제 팔과 비교)
 #   - URDF 가정 1·4: yaw→roll 오프셋 부호, wrist_yaw 회전 방향 (so102_urdf_check.py)
 leader_state_node:
@@ -17,7 +16,7 @@ leader_state_node:
     port: /dev/ttyACM0         # Windows는 COMx
     baudrate: 1000000
     servo_ids: [1, 2, 3, 4, 5, 6]             # 실기 확인 완료
-    offsets: [2048, 2048, 2048, 2048, 2048, 2048]
+    offsets: [2046, 2030, 2142, 2050, 1973, 2012]   # 2026-10-06 영점 자세 snapshot (그리퍼 ID 7은 2604)
     signs: [1, 1, 1, 1, 1, 1]
     aux_servo_id: 7                           # 그리퍼, 실기 확인 완료
     aux_range: [0, 4095]
