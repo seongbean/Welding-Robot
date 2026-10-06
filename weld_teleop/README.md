@@ -51,6 +51,10 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 
 `follower_opti3.yaml`의 `dry_run: true`가 기본값입니다. RViz에서 `/follower/ik_preview`로 동작을 확인한 다음에 false로 바꾸세요.
 
+## ROS 없이 Isaac Sim으로 (Windows)
+
+리더 암으로 Isaac Sim 장면의 opti3를 움직이는 방법은 [`sim_bridge/README.md`](../sim_bridge/README.md) 참고. 같은 config와 계산 코드(`teleop_loop.py`)를 쓴다.
+
 ## 테스트
 
 ROS 없이 기구학(FK/IK)과 EE 매핑 계산을 검증합니다. GitHub Actions에서 푸시·PR마다 자동 실행됩니다.
