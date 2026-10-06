@@ -10,3 +10,4 @@ ee_mapping_node:
     workspace_max: [0.6, 0.6, 0.8]
     auto_clutch: false
     follower_frame: link0
+    input_timeout: 0.2                      # s, 리더/팔로워 포즈가 끊기면 목표 발행 정지

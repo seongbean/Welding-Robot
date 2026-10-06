@@ -3,6 +3,7 @@
 - /follower/joint_states(파라미터로 토픽 지정) 수신 → FK → /follower/ee_pose 발행
 - /follower/ee_target 수신 → DLS IK → 관절 명령
 - dry_run=true(기본): 실제 명령 대신 /follower/ik_preview(JointState)만 발행 → RViz 확인용
+- 추종 오차·입력 끊김 시 명령 정지: follower_control.FollowerStepper 참고
 
 TODO(확인 필요): indy-ros2 실기 bringup에서 활성화되는 컨트롤러 이름과 명령 토픽.
   `ros2 control list_controllers`, `ros2 topic list`로 확인 후 command_topic/output_type 설정.
@@ -18,6 +19,7 @@ from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from .ee_mapping_node import msg_to_se3
+from .follower_control import FollowerStepper
 from .kinematics import ChainKinematics, se3_from_xyz_rpy, se3_to_xyzquat
 from .leader_fk_node import pose_msg
 
@@ -35,6 +37,8 @@ class FollowerIkNode(Node):
         self.declare_parameter('rate_hz', 100.0)
         self.declare_parameter('max_joint_step', 0.01)         # rad / cycle
         self.declare_parameter('ik_tolerance', 1e-3)            # log6 error norm
+        self.declare_parameter('max_track_error', 0.1)         # rad, 명령-실측 차이 한계
+        self.declare_parameter('input_timeout', 0.2)           # s, 목표·관절 상태 끊김 판정
         self.declare_parameter('dry_run', True)
         self.declare_parameter('output_type', 'joint_trajectory')  # | float64_array
         self.declare_parameter('command_topic',
@@ -49,17 +53,17 @@ class FollowerIkNode(Node):
             se3_from_xyz_rpy(p('tool_xyz'), p('tool_rpy')))
         self.base_frame = p('base_frame')
         self.dt = 1.0 / float(p('rate_hz'))
-        self.max_step = float(p('max_joint_step'))
-        self.tol = float(p('ik_tolerance'))
         self.dry_run = bool(p('dry_run'))
         self.output_type = p('output_type')
 
-        self.q_meas: np.ndarray | None = None
-        self.q_cmd: np.ndarray | None = None
-        self.target = None
         self.loopback = bool(p('loopback'))
+        self.stepper = FollowerStepper(
+            self.kin, max_joint_step=p('max_joint_step'), ik_tolerance=p('ik_tolerance'),
+            max_track_error=p('max_track_error'), input_timeout=p('input_timeout'),
+            use_measured=not self.loopback)
+        self._last_status = None
         if self.loopback:
-            self.q_cmd = np.array(p('initial_q'), dtype=float)
+            self.stepper.set_initial(p('initial_q'))
             self.dry_run = True  # loopback에서는 실기 명령 금지
         else:
             self.create_subscription(JointState, p('joint_state_topic'), self._on_js, 10)
@@ -79,29 +83,27 @@ class FollowerIkNode(Node):
             q = np.array([msg.position[idx[n]] for n in self.kin.joint_names])
         except KeyError:
             return
-        self.q_meas = q
-        if self.q_cmd is None:
-            self.q_cmd = q.copy()
+        self.stepper.on_measured(q, self._now())
         self.pub_pose.publish(pose_msg(se3_to_xyzquat(self.kin.fk(q)),
                                        self.base_frame, msg.header.stamp))
 
     def _on_target(self, msg: PoseStamped):
-        self.target = msg_to_se3(msg)
+        self.stepper.on_target(msg_to_se3(msg), self._now())
+
+    def _now(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
 
     def _tick(self):
         if self.loopback:
-            self.pub_pose.publish(pose_msg(se3_to_xyzquat(self.kin.fk(self.q_cmd)),
+            self.pub_pose.publish(pose_msg(se3_to_xyzquat(self.kin.fk(self.stepper.q_cmd)),
                                            self.base_frame, self.get_clock().now().to_msg()))
-        if self.target is None or self.q_cmd is None:
-            return
-        q_sol, ok, err = self.kin.ik(self.target, self.q_cmd)
-        if not ok and err > self.tol:
-            self.get_logger().warn(f'IK 미수렴 (err={err:.4f}) — 명령 보류',
-                                   throttle_duration_sec=1.0)
-            return
-        dq = np.clip(q_sol - self.q_cmd, -self.max_step, self.max_step)
-        self.q_cmd = self.q_cmd + dq
-        self._publish(self.q_cmd)
+        q = self.stepper.step(self._now())
+        status = self.stepper.status
+        if status != self._last_status and status not in ('ok', 'waiting'):
+            self.get_logger().warn(f'명령 정지: {status} {self.stepper.detail}')
+        self._last_status = status
+        if q is not None:
+            self._publish(q)
 
     def _publish(self, q: np.ndarray):
         now = self.get_clock().now().to_msg()

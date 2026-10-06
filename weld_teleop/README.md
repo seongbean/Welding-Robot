@@ -51,6 +51,17 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 
 `follower_opti3.yaml`의 `dry_run: true`가 기본값입니다. RViz에서 `/follower/ik_preview`로 동작을 확인한 다음에 false로 바꾸세요.
 
+## 테스트
+
+ROS 없이 기구학(FK/IK)과 EE 매핑 계산을 검증합니다. GitHub Actions에서 푸시·PR마다 자동 실행됩니다.
+
+```bash
+pip install pin numpy pytest
+pytest weld_teleop/test        # 저장소 루트에서
+```
+
+실측값으로 config나 URDF를 바꾼 뒤에도 이 테스트가 통과하는지 확인하세요.
+
 ## 확인/결정이 필요한 항목 (TODO)
 
 - [x] 개조형 URDF 수령 (`urdf/so102.urdf`, wrist_yaw 추가된 팔 6관절 + 그리퍼)
@@ -58,7 +69,7 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 - [ ] **SO-101 URDF의 joint/frame 이름:** 현재 config 값은 추정값이므로 실제 파일과 대조
 - [ ] **리더 캘리브레이션:** URDF 영점 자세에서의 tick 값으로 `offsets`, 회전 방향은 `signs`에 기록
 - [ ] **opti3 명령 인터페이스:** `ros2 control list_controllers`로 컨트롤러 이름을 확인한 뒤 `command_topic`/`output_type` 설정. 대안으로 indy_moveit `servo_mode`(MoveIt Servo)에 포즈 명령을 보내는 방식도 있음
-- [ ] **토치 팁 오프셋:** `tool_xyz/rpy` 실측 (opti3 `tcp`는 플랜지에 오프셋 0)
+- [ ] **토치 팁 오프셋:** Isaac Sim 장면의 CAD 값(`weld_tip`)을 `tool_xyz/rpy`에 넣음. 실물 와이어 돌출 길이와 같은지 실측 확인 필요
 - [ ] **베이스 정렬:** `leader_to_follower_rpy`, `position_scale`, `workspace_min/max`
 - [ ] **그리퍼(aux) 축 용도:** `ee_mapping_node._on_aux` (예: 아크 ON/OFF 트리거)
 - [ ] **클러치 입력 장치:** 풋페달·버튼 등 → `/teleop/clutch`
