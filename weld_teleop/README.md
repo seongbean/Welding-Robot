@@ -65,7 +65,8 @@ pytest weld_teleop/test        # 저장소 루트에서
 ## 확인/결정이 필요한 항목 (TODO)
 
 - [x] 개조형 URDF 수령 (`urdf/so102.urdf`, wrist_yaw 추가된 팔 6관절 + 그리퍼)
-- [ ] **SO-102 잔여 확인:** wrist_yaw 서보 ID, lerobot 모터 이름, URDF 임시 가정(yaw→roll 오프셋 부호·yaw 회전 방향·yaw 리밋)
+- [x] **SO-102 서보 ID:** pan=1 … roll=6, gripper=7 (`leader_probe.py`로 확인). lerobot은 wrist_yaw를 읽지 못해 feetech 드라이버 사용
+- [ ] **SO-102 URDF 임시 가정:** yaw→roll 오프셋 부호·yaw 회전 방향·yaw 리밋 (`so102_urdf_check.py`)
 - [ ] **SO-101 URDF의 joint/frame 이름:** 현재 config 값은 추정값이므로 실제 파일과 대조
 - [ ] **리더 캘리브레이션:** URDF 영점 자세에서의 tick 값으로 `offsets`, 회전 방향은 `signs`에 기록
 - [ ] **opti3 명령 인터페이스:** `ros2 control list_controllers`로 컨트롤러 이름을 확인한 뒤 `command_topic`/`output_type` 설정. 대안으로 indy_moveit `servo_mode`(MoveIt Servo)에 포즈 명령을 보내는 방식도 있음
