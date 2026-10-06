@@ -69,7 +69,7 @@ pytest weld_teleop/test        # 저장소 루트에서
 - [x] SO-102 URDF yaw→roll 오프셋 부호: -z로 확정 (2026-10-06 실측)
 - [ ] **SO-102 URDF 임시 가정:** yaw 회전 방향·yaw 리밋 (`so102_urdf_check.py`)
 - [ ] **SO-101 URDF의 joint/frame 이름:** 현재 config 값은 추정값이므로 실제 파일과 대조
-- [ ] **리더 캘리브레이션:** URDF 영점 자세에서의 tick 값으로 `offsets`, 회전 방향은 `signs`에 기록
+- [x] 리더 캘리브레이션 (SO-102): `offsets`·`signs`·그리퍼 `aux_range` 실측 기록 (2026-10-06)
 - [ ] **opti3 명령 인터페이스:** `ros2 control list_controllers`로 컨트롤러 이름을 확인한 뒤 `command_topic`/`output_type` 설정. 대안으로 indy_moveit `servo_mode`(MoveIt Servo)에 포즈 명령을 보내는 방식도 있음
 - [ ] **토치 팁 오프셋:** Isaac Sim 장면의 CAD 값(`weld_tip`)을 `tool_xyz/rpy`에 넣음. 실물 와이어 돌출 길이와 같은지 실측 확인 필요
 - [ ] **베이스 정렬:** `leader_to_follower_rpy`, `position_scale`, `workspace_min/max`
