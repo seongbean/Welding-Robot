@@ -51,6 +51,17 @@ ros2 topic pub /teleop/clutch std_msgs/msg/Bool "{data: true}" --once
 
 `follower_opti3.yaml`의 `dry_run: true`가 기본값입니다. RViz에서 `/follower/ik_preview`로 동작을 확인한 다음에 false로 바꾸세요.
 
+## 테스트
+
+ROS 없이 기구학(FK/IK)과 EE 매핑 계산을 검증합니다. GitHub Actions에서 푸시·PR마다 자동 실행됩니다.
+
+```bash
+pip install pin numpy pytest
+pytest weld_teleop/test        # 저장소 루트에서
+```
+
+실측값으로 config나 URDF를 바꾼 뒤에도 이 테스트가 통과하는지 확인하세요.
+
 ## 확인/결정이 필요한 항목 (TODO)
 
 - [x] 개조형 URDF 수령 (`urdf/so102.urdf`, wrist_yaw 추가된 팔 6관절 + 그리퍼)
