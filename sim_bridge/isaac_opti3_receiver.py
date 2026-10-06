@@ -4,7 +4,9 @@ Isaac Sim 5.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으�
   C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd C:\\...\\opti3_welding_scene\\posco_torch.usd
 
 - 장면 README대로 관절 drive 게인을 kp=1e4, kd=1e3 으로 올린다(그냥 Play하면 중력에 처짐).
-- 시작 자세는 follower_opti3.yaml의 initial_q. 목표가 안 오면 마지막 목표를 유지한다.
+- 시작 자세(--initial-q)는 토치가 로봇 앞에서 아래를 향하는 자세(관절 0, -30, 100, 0, 50, 0도).
+  follower_opti3.yaml의 initial_q(토치 팁이 로봇 뒤 바닥 근처)보다 사방으로 움직일 여유가 크다.
+  목표가 안 오면 마지막 목표를 유지한다.
 - 리더 쪽은 leader_to_sim.py. 종료는 창 닫기 또는 Ctrl+C.
 """
 from __future__ import annotations
@@ -18,7 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--usd', required=True, help='posco_torch.usd 경로 (폴더 구조 그대로)')
 ap.add_argument('--prim', default='/World/indy')
 ap.add_argument('--joints', default='joint0,joint1,joint2,joint3,joint4,joint5')
-ap.add_argument('--initial-q', default='0,0,-1.57,0,-1.57,0', help='rad, follower_opti3.yaml initial_q')
+ap.add_argument('--initial-q', default='0,-0.5236,1.7453,0,0.8727,0', help='rad, joint0~5 시작 자세')
 ap.add_argument('--listen', default='127.0.0.1:9870', help='관절 목표 수신 주소')
 ap.add_argument('--reply', default='127.0.0.1:9871', help='실측 관절값 보낼 주소 (leader_to_sim.py)')
 ap.add_argument('--kp', type=float, default=1e4)

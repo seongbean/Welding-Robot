@@ -41,6 +41,27 @@ def test_steps_toward_target_with_step_limit(kin):
     assert np.max(np.abs(q - Q0)) <= 0.01 + 1e-12
 
 
+def test_step_limit_keeps_joint_space_direction(kin):
+    s = make(kin)
+    s.on_measured(Q0, 0.0)
+    s.on_target(kin.fk(Q0 + np.array([0.0, 0.2, -0.1, 0.0, 0.05, 0.0])), 0.0)
+    dq = s.step(DT) - Q0
+    sol = s.q_ik - Q0
+    assert np.max(np.abs(dq)) == pytest.approx(0.01)
+    assert np.allclose(dq / np.linalg.norm(dq), sol / np.linalg.norm(sol), atol=1e-9)
+
+
+def test_ik_seed_follows_previous_solution_and_resets_on_resync(kin):
+    s = make(kin)
+    s.on_measured(Q0, 0.0)
+    s.on_target(target_near(kin, dq=0.3), 0.0)
+    s.step(DT)
+    assert s.q_ik is not None and kin.fk(s.q_ik).isApprox(target_near(kin, dq=0.3), 1e-3)
+    s.on_measured(Q0 + 0.5, DT)   # 큰 추종 오차 → 재동기화
+    s.step(DT)
+    assert s.status == 'tracking_error' and s.q_ik is None
+
+
 def test_converges_when_robot_follows(kin):
     s = make(kin)
     target = target_near(kin)

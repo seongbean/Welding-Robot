@@ -29,7 +29,7 @@ Isaac Sim 쪽은 Isaac Sim에 들어 있는 파이썬을 쓰므로 설치할 것
 ```bat
 C:\isaacsim\python.bat C:\workspace\Welding-Robot\sim_bridge\isaac_opti3_receiver.py --usd C:\...\opti3_welding_scene\posco_torch.usd
 ```
-장면이 열리면 opti3가 시작 자세(`initial_q`)로 선다.
+장면이 열리면 opti3가 시작 자세(토치가 로봇 앞에서 아래를 향함, `--initial-q`로 변경 가능)로 선다.
 
 터미널 2: 리더 (`conda activate weld` 후, 저장소 루트에서)
 ```bat
@@ -42,7 +42,7 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
 - **Enter** = 클러치 ON/OFF (시작은 OFF). ON 순간의 리더·opti3 자세를 기준으로 리더의 상대 이동만 따라간다.
   OFF 상태에서 리더를 편한 자세로 옮긴 뒤 다시 ON 하면 튀지 않는다.
 - 상태 줄: `ok` 정상, `clutch_off`, `waiting`(Isaac Sim 실측 대기), `joint_state_timeout`(Isaac Sim 끊김),
-  `tracking_error`(명령과 실측 차이가 큼 → 재동기화), `ik_failed`(도달 불가 자세), `leader_lost`(리더 읽기 실패)
+  `tracking_error`(명령과 실측 차이가 큼 → 재동기화), `ik_failed`(도달 불가·특이점 자세: 클러치 OFF 후 리더를 돌려놓고 다시 ON), `leader_lost`(리더 읽기 실패)
 - 그리퍼 %는 표시만 한다(용도 미정).
 
 ## 확인 안 된 것
