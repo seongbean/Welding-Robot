@@ -41,8 +41,14 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
 
 - **Enter** = 클러치 ON/OFF (시작은 OFF). ON 순간의 리더·opti3 자세를 기준으로 리더의 상대 이동만 따라간다.
   OFF 상태에서 리더를 편한 자세로 옮긴 뒤 다시 ON 하면 튀지 않는다.
-- 상태 줄: `ok` 정상, `clutch_off`, `waiting`(Isaac Sim 실측 대기), `joint_state_timeout`(Isaac Sim 끊김),
-  `tracking_error`(명령과 실측 차이가 큼 → 재동기화), `ik_failed`(도달 불가·특이점 자세: 클러치 OFF 후 리더를 돌려놓고 다시 ON), `leader_lost`(리더 읽기 실패)
+- **범위 밖**: 리더가 opti3 도달 범위 밖(또는 특이점 쪽)으로 가면 토치는 갈 수 있는 경계까지만 가서 멈추고
+  상태가 `out_of_reach`가 된다. 리더를 안쪽으로 되돌리면 클러치를 다시 누르지 않아도 그 자리에서 바로 따라간다.
+  (범위 밖에서 움직인 만큼은 버려지므로 리더와 토치의 상대 위치가 그만큼 바뀐다)
+- **목표 마커**: Isaac Sim에 리더가 가리키는 토치 팁 목표 포즈가 축 마커로 보인다(x 빨강, y 초록, z 파랑 = 토치 방향,
+  노란 공 = 팁). 마커와 토치 팁이 같이 움직이면 매핑이 맞는 것이다. 끄려면 receiver에 `--no-marker`.
+- 상태 줄: `ok` 정상, `out_of_reach`(위 설명), `clutch_off`, `waiting`(Isaac Sim 실측 대기),
+  `joint_state_timeout`(Isaac Sim 끊김), `tracking_error`(명령과 실측 차이가 큼 → 재동기화),
+  `out_of_limits`(실측 관절이 URDF 리밋 밖), `leader_lost`(리더 읽기 실패)
 - 그리퍼 %는 표시만 한다(용도 미정).
 
 ## 확인 안 된 것

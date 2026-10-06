@@ -20,10 +20,14 @@ from .kinematics import ChainKinematics
 class FollowerStepper:
     def __init__(self, kin: ChainKinematics, max_joint_step: float = 0.01,
                  ik_tolerance: float = 1e-3, max_track_error: float = 0.1,
+                 ik_accept_error: float | None = None,
                  input_timeout: float = 0.2, use_measured: bool = True):
         self.kin = kin
         self.max_step = float(max_joint_step)
         self.tol = float(ik_tolerance)
+        # 근사 해 허용 한계: tol < 오차 <= accept면 IK 최소제곱 해(가장 가까운 자세)로 명령을 보내고
+        # status='approx'. 도달 범위 경계·특이점 근처에서 멈추지 않고 경계를 따라 움직이게 한다.
+        self.accept = max(self.tol, float(ik_accept_error)) if ik_accept_error is not None else self.tol
         self.max_track_error = float(max_track_error)
         self.timeout = float(input_timeout)
         self.use_measured = use_measured
@@ -86,7 +90,7 @@ class FollowerStepper:
         # (속도 제한으로 뒤처진 q_cmd에서 풀면 먼 목표로 점프하다 국소해에 빠짐)
         seed = self.q_ik if self.q_ik is not None else self.q_cmd
         q_sol, ok, err = self.kin.ik(self.target, seed)
-        if not ok and err > self.tol:
+        if not ok and err > self.accept:
             self.status, self.detail = 'ik_failed', f'err={err:.4f}'
             return None
         self.q_ik = q_sol
@@ -97,5 +101,8 @@ class FollowerStepper:
         if peak > self.max_step:
             dq *= self.max_step / peak
         self.q_cmd = self.q_cmd + dq
-        self.status = 'ok'
+        if ok or err <= self.tol:
+            self.status = 'ok'
+        else:
+            self.status, self.detail = 'approx', f'err={err:.4f}'
         return self.q_cmd

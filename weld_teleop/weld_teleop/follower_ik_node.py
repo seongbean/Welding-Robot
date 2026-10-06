@@ -37,6 +37,7 @@ class FollowerIkNode(Node):
         self.declare_parameter('rate_hz', 100.0)
         self.declare_parameter('max_joint_step', 0.01)         # rad / cycle
         self.declare_parameter('ik_tolerance', 1e-3)            # log6 error norm
+        self.declare_parameter('ik_accept_error', 1e-3)         # 이하면 IK 근사 해로도 명령 (status approx)
         self.declare_parameter('max_track_error', 0.1)         # rad, 명령-실측 차이 한계
         self.declare_parameter('input_timeout', 0.2)           # s, 목표·관절 상태 끊김 판정
         self.declare_parameter('dry_run', True)
@@ -59,6 +60,7 @@ class FollowerIkNode(Node):
         self.loopback = bool(p('loopback'))
         self.stepper = FollowerStepper(
             self.kin, max_joint_step=p('max_joint_step'), ik_tolerance=p('ik_tolerance'),
+            ik_accept_error=p('ik_accept_error'),
             max_track_error=p('max_track_error'), input_timeout=p('input_timeout'),
             use_measured=not self.loopback)
         self._last_status = None
@@ -99,7 +101,7 @@ class FollowerIkNode(Node):
                                            self.base_frame, self.get_clock().now().to_msg()))
         q = self.stepper.step(self._now())
         status = self.stepper.status
-        if status != self._last_status and status not in ('ok', 'waiting'):
+        if status != self._last_status and status not in ('ok', 'waiting', 'approx'):
             self.get_logger().warn(f'명령 정지: {status} {self.stepper.detail}')
         self._last_status = status
         if q is not None:

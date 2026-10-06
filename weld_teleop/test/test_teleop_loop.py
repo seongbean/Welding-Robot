@@ -107,3 +107,39 @@ def test_build_loop_from_package_configs(tmp_path):
     loop = build_loop(os.path.join(cfg, 'leader_so101_7axis.yaml'),
                       os.path.join(cfg, 'mapping.yaml'), str(f), SO102_URDF, SO102_URDF)
     assert loop.leader_kin.nq == 6 and loop.stepper.timeout == p['input_timeout']
+
+
+def test_out_of_reach_holds_then_follows_back_without_reclutch(kin):
+    loop = TeleopLoop(kin, kin, EeMapper(position_scale=3.0, max_linear_step=0.01, max_angular_step=0.1,
+                                         workspace_min=(-2, -2, -2), workspace_max=(2, 2, 2)),
+                      FollowerStepper(kin, max_joint_step=0.05, input_timeout=0.2))
+    dq = np.array([0.0, 0.5, -0.5, 0.0, 0.0, 0.0])   # 리더 팔을 앞으로 뻗음 (×3이면 팔로워 범위 밖)
+    out = [QL + dq * s for s in np.linspace(0, 1, 60)]
+    back = [QL + dq * s for s in np.linspace(1, 0.7, 30)]
+    path = [QL] * 3 + out + back
+    q, statuses, xs = QF.copy(), [], []
+    for i, ql in enumerate(path):
+        loop.on_measured(q, i * DT)
+        r = loop.tick(i * DT, ql, clutch=True)
+        q = r if r is not None else q
+        statuses.append(loop.status)
+        xs.append(kin.fk(q).translation[0])
+    n_out = 3 + len(out)
+    assert 'out_of_reach' in statuses[:n_out]
+    assert statuses[-1] == 'ok'                     # 클러치를 다시 누르지 않아도 재개
+    assert xs[-1] < xs[n_out - 1] - 0.02            # 리더가 돌아온 만큼 안쪽으로 따라옴
+    assert not loop.out_of_reach
+
+
+def test_clutch_off_clears_out_of_reach(kin):
+    loop = make(kin)
+    loop.out_of_reach = True
+    loop.on_measured(QF, 0.0)
+    loop.tick(0.0, QL, clutch=False)
+    loop.tick(0.01, QL, clutch=True)                # 재기준 주기: 'waiting'이어야 함
+    assert loop.status == 'waiting'
+
+
+def test_target_pose_rides_along_in_udp_message():
+    msg = decode(encode([0.0] * 6, target=[0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]), 6)
+    assert msg['target'] == [0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]
