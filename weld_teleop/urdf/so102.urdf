@@ -26,7 +26,8 @@
        체인 패턴 - SO-101 flex->roll 오프셋과 동일 구조)
     3. SO-101 roll 축의 스큐(0.0487 rad)는 직각 설계 가정으로 제거
     4. wrist_yaw 축 부호는 임시 - 실기에서 회전 방향 확인 필요
-    5. wrist_yaw 리밋 +-1.5708 rad(+-90도)는 임시값 (기구 간섭각 미측정)
+    5. wrist_yaw 리밋: 2026-10-06 실측 (watch -80~+80도, 영점 offset 1973 tick
+       = -6.6도 보정 후 -73.4~+86.6도)
     6. 손목 구간 질량/관성은 SO-101 값 유지 + placeholder (기구학 IK 무영향)
   메시(visual/collision)는 생략 - 기구학(IK) 전용. 원본 메시 경로가 이
   디렉터리에 없기도 하고, SO-102 손목 부품 형상도 다르다.
@@ -160,7 +161,7 @@
     <parent link="wrist_link"/>
     <child link="wrist_yaw_link"/>
     <axis xyz="0 0 1"/>
-    <limit effort="10" velocity="10" lower="-1.5708" upper="1.5708"/>
+    <limit effort="10" velocity="10" lower="-1.2812" upper="1.5113"/>
   </joint>
 
   <!-- [수정] wrist_roll: 부모가 wrist_yaw_link로 변경. wrist_yaw 축에서

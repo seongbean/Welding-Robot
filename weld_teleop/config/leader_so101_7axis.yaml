@@ -6,7 +6,7 @@
 # lerobot 드라이버는 쓸 수 없음: lerobot SO101Leader는 모터 6개(ID 5=wrist_roll, 6=gripper)로
 #   고정되어 있어 이 팔에서는 wrist_yaw를 wrist_roll로, wrist_roll을 gripper로 잘못 읽는다.
 # TODO(실측 확인):
-#   - URDF 가정 4·5: wrist_yaw 회전 방향, 리밋 (so102_urdf_check.py). 가정 1(오프셋 부호)은 확정
+#   - URDF 가정 4: wrist_yaw 회전 방향 (so102_urdf_check.py). 가정 1(오프셋 부호)·5(리밋)는 확정
 leader_state_node:
   ros__parameters:
     driver: feetech            # 실기: feetech (lerobot 불가, 위 주석) | 테스트: mock
