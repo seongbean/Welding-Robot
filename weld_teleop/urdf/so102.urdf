@@ -19,8 +19,9 @@
   임시 가정 (CAD 확정 시 갱신할 것):
     1. 두 오프셋의 부호는 임시 - flex->yaw는 SO-101 flex->roll과 같은
        쪽(+z_wrist_link)으로 가정(zero pose TCP가 SO-101과 0.4mm 이내
-       일치해 방증), yaw->roll(+z_wrist_yaw_link)은 미확인. 실기/CAD
-       확인 후 반대면 해당 origin 성분을 -0.0181로 뒤집기
+       일치해 방증). yaw->roll은 -z_wrist_yaw_link로 확정(2026-10-06 실측:
+       영점 자세에서 wrist_roll 축이 wrist_flex 축보다 +10 mm 높음,
+       예측 +z 가정 -18 mm / -z 가정 +18 mm)
     2. 오프셋 방향은 "직전 관절 회전축 방향"으로 가정 (서보 혼 장착
        체인 패턴 - SO-101 flex->roll 오프셋과 동일 구조)
     3. SO-101 roll 축의 스큐(0.0487 rad)는 직각 설계 가정으로 제거
@@ -164,12 +165,12 @@
 
   <!-- [수정] wrist_roll: 부모가 wrist_yaw_link로 변경. wrist_yaw 축에서
        링크 방향(-y)으로 0.056m + yaw 축 방향(+z = 이 프레임의 관절축)
-       오프셋 0.0181m (실측, 부호 임시). rpy="0 1.5708 1.5708"은
+       반대(-z) 오프셋 0.0181m (실측, 부호 2026-10-06 확인). rpy="0 1.5708 1.5708"은
        Ry(-90) * Rz(180) * Rx(90) 합성 결과로, wrist_yaw=0일 때
        gripper_link 방향이 SO-101과 일치하도록(스큐 제거만 차이) 맞춘 값.
        리밋은 SO-101 값 유지 - TODO: SO-102 실기 확인 -->
   <joint name="wrist_roll" type="revolute">
-    <origin xyz="0 -0.056 0.0181" rpy="0 1.5708 1.5708"/>
+    <origin xyz="0 -0.056 -0.0181" rpy="0 1.5708 1.5708"/>
     <parent link="wrist_yaw_link"/>
     <child link="gripper_link"/>
     <axis xyz="0 0 1"/>
