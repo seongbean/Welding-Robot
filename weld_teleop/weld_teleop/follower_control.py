@@ -29,6 +29,7 @@ class FollowerStepper:
         self.use_measured = use_measured
 
         self.q_cmd: np.ndarray | None = None
+        self.q_ik: np.ndarray | None = None      # 직전 IK 해 (다음 IK 시드)
         self.q_meas: np.ndarray | None = None
         self.t_meas: float | None = None
         self.target: pin.SE3 | None = None
@@ -73,17 +74,28 @@ class FollowerStepper:
             err = float(np.max(np.abs(self.q_cmd - self.q_meas)))
             if err > self.max_track_error:
                 self.q_cmd = self.q_meas.copy()   # 재동기화: 다음 주기는 실측에서 다시 시작
+                self.q_ik = None
                 self.status, self.detail = 'tracking_error', f'{err:.3f} rad'
                 return None
         if t - self.t_target > self.timeout:
             self.status = 'target_timeout'
+            self.q_ik = None   # 목표 재개 시 현재 명령에서 다시 시작
             return None
 
-        q_sol, ok, err = self.kin.ik(self.target, self.q_cmd)
+        # IK 시드는 직전 IK 해: 목표는 주기마다 조금씩만 움직이므로 같은 해 가지를 따라간다.
+        # (속도 제한으로 뒤처진 q_cmd에서 풀면 먼 목표로 점프하다 국소해에 빠짐)
+        seed = self.q_ik if self.q_ik is not None else self.q_cmd
+        q_sol, ok, err = self.kin.ik(self.target, seed)
         if not ok and err > self.tol:
             self.status, self.detail = 'ik_failed', f'err={err:.4f}'
             return None
-        dq = np.clip(q_sol - self.q_cmd, -self.max_step, self.max_step)
+        self.q_ik = q_sol
+        # 관절별로 따로 자르면 관절 공간 방향이 바뀌어 IK 해 사이를 벗어난 자세가 되므로,
+        # 가장 큰 관절이 max_step이 되도록 전체를 같은 비율로 줄인다.
+        dq = q_sol - self.q_cmd
+        peak = float(np.max(np.abs(dq)))
+        if peak > self.max_step:
+            dq *= self.max_step / peak
         self.q_cmd = self.q_cmd + dq
         self.status = 'ok'
         return self.q_cmd

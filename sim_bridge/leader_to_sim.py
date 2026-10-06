@@ -48,6 +48,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port', help='리더 시리얼 포트 (예: COM3)')
     ap.add_argument('--mock', action='store_true', help='리더 없이 사인파 입력')
+    ap.add_argument('--mock-amp', type=float, default=0.05,
+                    help='mock 관절 진폭 [rad]. 크면(0.2) 리더 끝이 30 cm 넘게 움직여 opti3 도달 범위를 벗어남')
     ap.add_argument('--follower-urdf', required=True, help='opti3.urdf 경로')
     ap.add_argument('--leader-urdf', default=os.path.join(PKG, 'urdf', 'so102.urdf'))
     ap.add_argument('--leader-config', default=cfg('leader_so101_7axis.yaml'))
@@ -66,7 +68,7 @@ def main():
     st = ros_params(args.leader_config, 'leader_state_node')
     aux_id = int(st['aux_servo_id'])
     if args.mock:
-        driver = MockDriver(len(st['joint_names']), has_aux=aux_id >= 0)
+        driver = MockDriver(len(st['joint_names']), amplitude=args.mock_amp, has_aux=aux_id >= 0)
     else:
         driver = FeetechDriver(args.port, int(st['baudrate']), list(st['servo_ids']),
                                list(st['offsets']), list(st['signs']),
