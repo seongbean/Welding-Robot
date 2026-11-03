@@ -147,3 +147,4 @@ $$
 - [설계 결정](docs/design-decisions.md): 설계마다 검토한 대안, 고른 이유, 바꿀 때 영향받는 곳.
 - [weld_teleop/README.md](weld_teleop/README.md): ROS2 텔레옵 노드 구성과 실행 방법.
 - [sim_bridge/README.md](sim_bridge/README.md): 리더 암으로 Isaac Sim 안의 opti3를 움직이는 구성과 실행 방법.
+- [sim_errors/README.md](sim_errors/README.md): Isaac Sim 모재 오차 시나리오와 규칙 전문가 에피소드 생성.
