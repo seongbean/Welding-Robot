@@ -51,6 +51,10 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
   `out_of_limits`(실측 관절이 URDF 리밋 밖), `leader_lost`(리더 읽기 실패)
 - 그리퍼 %는 표시만 한다(용도 미정).
 
+## 4. 모재 오차 시나리오와 규칙 전문가
+
+`--scenario`로 모재 오차 시나리오를 주면 receiver가 모재(바닥 판·웹 판·가접)를 만들고, 리더 대신 `expert_to_sim.py`가 실제 이음매를 따라 토치를 움직이며 정답을 기록한다. 실행 순서와 기록 형식은 [sim_errors/README.md](../sim_errors/README.md).
+
 ## 확인 안 된 것
 
 - `opti3.urdf` 경로: indy-ros2-jazzy 안의 실제 위치로 바꿔 쓴다(xacro만 있으면 알려 줄 것).

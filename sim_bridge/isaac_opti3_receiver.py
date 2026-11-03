@@ -10,11 +10,15 @@ Isaac Sim 5.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으�
 - 리더가 가리키는 목표 포즈(토치 팁)를 축 마커로 표시한다. 토치 팁(weld_tip)과 마커가 같이 움직이면
   매핑이 맞는 것이다. 마커 z축(파랑)이 토치 방향.
 - 리더 쪽은 leader_to_sim.py. 종료는 창 닫기 또는 Ctrl+C.
+- --scenario(sim_errors/make_scenarios.py가 만든 JSON)를 주면 모재(바닥 판·웹 판·가접)를 만들고,
+  패킷의 scene.s_arc(아크 진행도)에 맞춰 변형·밀림을 그린다. 빨간 선 = 실제 이음매, 파란 선 = 추정 경로.
+  보내는 쪽은 expert_to_sim.py (모재 배치도 패킷으로 받는다). 모재는 표시 전용(충돌 없음).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 
@@ -30,6 +34,7 @@ ap.add_argument('--kd', type=float, default=1e3)
 ap.add_argument('--headless', action='store_true')
 ap.add_argument('--base-link', default='/World/indy/link0', help='URDF base_frame(link0)에 해당하는 prim')
 ap.add_argument('--no-marker', action='store_true', help='목표 포즈 마커 끄기')
+ap.add_argument('--scenario', help='모재 오차 시나리오 JSON (sim_errors/make_scenarios.py)')
 args = ap.parse_args()
 
 from isaacsim import SimulationApp  # noqa: E402
@@ -42,7 +47,9 @@ from isaacsim.core.prims import SingleArticulation  # noqa: E402
 from isaacsim.core.utils.stage import open_stage  # noqa: E402
 from isaacsim.core.utils.types import ArticulationAction  # noqa: E402
 import omni.usd  # noqa: E402
-from pxr import Gf, Usd, UsdGeom  # noqa: E402
+from pxr import Gf, Usd, UsdGeom, Vt  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # sim_errors (numpy만 사용)
 
 
 def addr(s: str) -> tuple[str, int]:
@@ -122,8 +129,104 @@ def set_marker(xyzquat) -> None:
         marker_shown = True
 
 
+WP_ROOT = '/World/workpiece'
+
+
+def base_matrix(stage) -> Gf.Matrix4d:
+    base = stage.GetPrimAtPath(args.base_link)
+    if base.IsValid():
+        return UsdGeom.Xformable(base).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    return Gf.Matrix4d(1.0)
+
+
+def np_to_gf(T) -> Gf.Matrix4d:
+    return Gf.Matrix4d(np.asarray(T, dtype=float).T.tolist())   # USD는 행벡터 규약
+
+
+class Workpiece:
+    """시나리오의 모재를 link0 기준으로 그리고, 아크 진행도에 따라 변형한다 (표시 전용)."""
+
+    def __init__(self, stage, path: str):
+        from sim_errors.part_errors import PartErrorModel, load_scenario
+        self.model = PartErrorModel(load_scenario(path))
+        self.pts0, self.plate, counts, idx = self.model.nominal_meshes()
+        self.s_grid = np.linspace(0.0, 1.0, 121)
+        UsdGeom.Xform.Define(stage, WP_ROOT).AddTransformOp().Set(base_matrix(stage))
+        self.meshes = []
+        for pid, name, color in ((0, 'base_plate', (0.55, 0.57, 0.6)), (1, 'web_plate', (0.62, 0.6, 0.58))):
+            sel = self.plate == pid
+            remap = -np.ones(len(self.plate), dtype=int)
+            remap[sel] = np.arange(sel.sum())
+            k, f_counts, f_idx = 0, [], []
+            for c in counts:
+                face = idx[k:k + c]
+                k += c
+                if sel[face].all():
+                    f_counts.append(int(c))
+                    f_idx += remap[face].tolist()
+            m = UsdGeom.Mesh.Define(stage, f'{WP_ROOT}/{name}')
+            m.CreateFaceVertexCountsAttr(f_counts)
+            m.CreateFaceVertexIndicesAttr(f_idx)
+            m.CreateSubdivisionSchemeAttr('none')
+            m.CreateDoubleSidedAttr(True)
+            m.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+            self.meshes.append((m, sel))
+        self.tacks = []
+        for i, t in enumerate(self.model.scn['shape']['tacks']):
+            x = UsdGeom.Xform.Define(stage, f'{WP_ROOT}/tack{i}')
+            op = x.AddTransformOp()
+            c = UsdGeom.Capsule.Define(stage, f'{WP_ROOT}/tack{i}/bead')
+            c.CreateAxisAttr('X')
+            c.CreateRadiusAttr(t['height'])
+            c.CreateHeightAttr(max(0.0, t['length'] - 2 * t['height']))
+            c.CreateDisplayColorAttr([Gf.Vec3f(0.35, 0.3, 0.25)])
+            self.tacks.append((op, t['s']))
+        self.true_curve = self._curve(stage, f'{WP_ROOT}/seam_true', (1, 0.1, 0.1))
+        self.est_curve = self._curve(stage, f'{WP_ROOT}/seam_est', (0.1, 0.3, 1))
+        self.s_arc = None
+        self.update(0.0, force=True)
+
+    @staticmethod
+    def _curve(stage, path, color):
+        c = UsdGeom.BasisCurves.Define(stage, path)
+        c.CreateTypeAttr('linear')
+        c.CreateWidthsAttr([0.0015])
+        c.SetWidthsInterpolation(UsdGeom.Tokens.constant)
+        c.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        return c
+
+    @staticmethod
+    def _set_curve(c, P):
+        c.CreateCurveVertexCountsAttr([len(P)])
+        c.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(np.asarray(P, dtype=np.float32)))
+
+    def set_nominal(self, T_nominal) -> None:
+        T = np.asarray(T_nominal, dtype=float).reshape(4, 4)
+        if not np.allclose(T, np.asarray(self.model.scn['T_nominal'])):
+            self.model.set_nominal(T)
+            self.update(self.s_arc or 0.0, force=True)
+
+    def update(self, s_arc: float, force: bool = False) -> None:
+        if not force and self.s_arc is not None and abs(s_arc - self.s_arc) < 2e-3:
+            return
+        self.s_arc = s_arc
+        P = self.model.deform_points(self.pts0, self.plate, s_arc).astype(np.float32)
+        for m, sel in self.meshes:
+            m.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(P[sel]))
+        Pt, _ = self.model.seam_true(self.s_grid, s_arc)
+        Pe, _ = self.model.seam_est(self.s_grid)
+        self._set_curve(self.true_curve, Pt)
+        self._set_curve(self.est_curve, Pe)
+        for op, s in self.tacks:
+            p, R = self.model.seam_true(s, s_arc)
+            T = np.eye(4)
+            T[:3, :3], T[:3, 3] = R[0], p[0]
+            op.Set(np_to_gf(T))
+
+
 idx, target = setup()
 marker, marker_op = (None, None) if args.no_marker else make_marker(omni.usd.get_context().get_stage())
+workpiece = Workpiece(omni.usd.get_context().get_stage(), args.scenario) if args.scenario else None
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(addr(args.listen))
 sock.setblocking(False)
@@ -154,6 +257,14 @@ try:
                 n_rx += 1
             if marker is not None and tgt.shape == (7,) and np.all(np.isfinite(tgt)):
                 set_marker(tgt)
+            scene = msg.get('scene') if isinstance(msg, dict) else None
+            if workpiece is not None and isinstance(scene, dict):
+                try:
+                    if 'T_nominal' in scene:
+                        workpiece.set_nominal(scene['T_nominal'])
+                    workpiece.update(float(scene.get('s_arc', 0.0)))
+                except (ValueError, TypeError) as e:
+                    print(f'[receiver] scene 무시: {e}')
         robot.apply_action(ArticulationAction(joint_positions=target))
         world.step(render=not args.headless)
         if world.is_playing():
