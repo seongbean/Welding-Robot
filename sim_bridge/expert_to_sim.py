@@ -158,7 +158,7 @@ def main():
                 if q is not None:
                     sock.sendto(encode(q, target=se3_to_xyzquat(to_se3(r['T_target'])).tolist(), scene=scene), dest)
                 T_meas = kin.fk(stepper.q_meas).homogeneous
-                rec.add(t=r['t'], phase=r['phase'], arc_on=r['arc_on'], s=r['s'], s_arc=r['s_arc'],
+                rec.add(t=r['t'], phase=r['phase'], arc_on=r['arc_on'], done=r['done'], s=r['s'], s_arc=r['s_arc'],
                         e=r['e'], rotvec=r['rotvec'], gap=r['gap'], tack=r['tack'],
                         weave_amp=r['weave_amp'], weave_hz=r['weave_hz'], speed=r['speed'], laser=r['laser'],
                         p_true=r['p_true'], p_est=r['p_est'], T_target=r['T_target'], T_meas=T_meas,
