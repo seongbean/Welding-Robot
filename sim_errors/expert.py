@@ -82,6 +82,7 @@ class ScriptedExpert:
     # --- 1주기
     def step(self, dt: float) -> dict:
         ex = self.ex
+        phase = self.phase      # 이 주기의 목표를 만든 단계 (주기 끝에 다음 단계로 넘어가도 기록은 이 단계)
         self.t += dt
         self.t_phase += dt
         standoff = ex['standoff_mm'] * MM
@@ -114,12 +115,12 @@ class ScriptedExpert:
         self.T_last = T
 
         lab = self.m.label(self.s, self.s_arc)
-        return {'t': self.t, 'phase': self.phase, 'arc_on': self.phase == 'weld',
+        return {'t': self.t, 'phase': phase, 'arc_on': phase == 'weld', 'done': self.done,
                 's': self.s, 's_arc': self.s_arc, 'T_target': T,
                 'e': lab['e'], 'rotvec': lab['rotvec'], 'gap': lab['gap'], 'tack': lab['tack'],
                 'p_true': lab['p_true'], 'p_est': lab['p_est'],
-                'weave_amp': amp, 'weave_hz': ex['weave_hz'] if self.phase == 'weld' else 0.0, 'speed': v,
-                'laser': (self.m.laser(self.s, self.s_arc, self.rng) if self.phase == 'weld'
+                'weave_amp': amp, 'weave_hz': ex['weave_hz'] if phase == 'weld' else 0.0, 'speed': v,
+                'laser': (self.m.laser(self.s, self.s_arc, self.rng) if phase == 'weld'
                           else np.array([np.nan, np.nan]))}
 
     @property

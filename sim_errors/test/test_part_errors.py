@@ -191,7 +191,9 @@ def test_expert_full_episode(cfg):
     assert ex.done
     phases = [r['phase'] for r in out]
     order = [p for i, p in enumerate(phases) if i == 0 or p != phases[i - 1]]
-    assert order == ['approach', 'descend', 'weld', 'retract', 'done']
+    assert order == ['approach', 'descend', 'weld', 'retract'] and out[-1]['done']
+    # 단계가 바뀌는 주기도 그 목표를 만든 단계로 기록 (첫 용접 주기부터 진행도가 0보다 큼)
+    assert all(r['s'] > 0 for r in out if r['arc_on'])
     weld = [r for r in out if r['arc_on']]
     s = np.array([r['s'] for r in out])
     assert np.all(np.diff(s) >= 0) and s.max() == pytest.approx(1.0)
