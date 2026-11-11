@@ -83,16 +83,20 @@ def check_articulation(stage, usd_path: str, prim_path: str) -> None:
             full = os.path.normpath(dep if os.path.isabs(dep) else os.path.join(here, dep))
             if not os.path.exists(full):
                 missing.append(full)
-    lines = [f'{prim_path} 아래에 articulation(ArticulationRootAPI)이 없음.']
-    if not stage.GetPrimAtPath(prim_path).IsValid() or not stage.GetPrimAtPath(prim_path).IsDefined():
-        lines.append(f'  {prim_path} 프림이 정의되지 않음(참조가 안 풀린 over일 가능성).')
+    # Kit의 sys.exit는 정수만 받고, Windows 콘솔은 한글이 깨지므로 영어로 출력 후 exit(1)
+    lines = [f'[receiver] ERROR: no articulation (ArticulationRootAPI) under {prim_path}']
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim.IsValid() or not prim.IsDefined():
+        lines.append(f'  {prim_path} is not defined (probably an unresolved reference)')
     if missing:
-        lines.append('  찾을 수 없는 참조 파일:')
+        lines.append('  referenced files not found:')
         lines += [f'    {m}' for m in missing]
-        lines.append('  → usd를 원래 장면 폴더(robot/, assets/가 옆에 있는 곳)에서 열거나, 그 폴더들을 usd 옆에 복사하세요.')
+        lines.append('  -> put the robot/ and assets/ folders next to the usd, or open the usd in the original scene folder')
     if roots:
-        lines.append(f'  다른 곳의 articulation: {roots} → --prim 으로 지정 가능')
-    sys.exit('\n'.join(lines))
+        lines.append(f'  articulations elsewhere: {roots} (use --prim)')
+    print('\n'.join(lines), flush=True)
+    app.close()
+    sys.exit(1)
 
 
 if not open_stage(args.usd):
