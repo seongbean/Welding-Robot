@@ -29,10 +29,6 @@ Isaac Sim 쪽은 Isaac Sim에 들어 있는 파이썬을 쓰므로 설치할 것
 ```bat
 C:\isaacsim\python.bat C:\workspace\Welding-Robot\sim_bridge\isaac_opti3_receiver.py --usd C:\...\opti3_welding_scene\posco_torch.usd
 ```
-`posco_torch.usd`는 로봇(`robot/opti3/opti3.usd`)과 토치(`assets/...`)를 상대 경로로 참조한다.
-usd 파일만 다른 폴더로 복사하면 로봇이 안 불러와져 `/World/indy` articulation을 못 찾으므로,
-`robot/`, `assets/`가 옆에 있는 원래 장면 폴더의 usd를 지정한다(수신기가 시작 시 끊긴 참조를 알려 준다).
-
 장면이 열리면 opti3가 시작 자세(토치가 로봇 앞에서 아래를 향함, `--initial-q`로 변경 가능)로 선다.
 
 터미널 2: 리더 (`conda activate weld` 후, 저장소 루트에서)
