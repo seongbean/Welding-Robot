@@ -60,44 +60,8 @@ def addr(s: str) -> tuple[str, int]:
 JOINTS = args.joints.split(',')
 Q0 = np.array([float(x) for x in args.initial_q.split(',')])
 
-
-def check_articulation(stage, usd_path: str, prim_path: str) -> None:
-    """world.reset() 전에 articulation이 실제로 있는지 본다. 없으면 이유를 알려 주고 끝낸다.
-
-    posco_torch.usd는 로봇을 ./robot/opti3/opti3.usd, 토치를 ./assets/... 상대 경로로 참조한다.
-    usd 파일만 다른 폴더로 복사하면 참조가 끊겨 /World/indy가 빈 껍데기(over)가 되고,
-    Isaac은 "Pattern '/World/indy' did not match any articulations"로 죽는다.
-    """
-    from pxr import UsdPhysics
-    roots = [str(p.GetPath()) for p in stage.Traverse() if p.HasAPI(UsdPhysics.ArticulationRootAPI)]
-    if any(r == prim_path or r.startswith(prim_path + '/') for r in roots):
-        return
-    missing = []
-    for layer in stage.GetLayerStack(includeSessionLayers=False):
-        if layer.anonymous:
-            continue
-        here = os.path.dirname(layer.realPath or os.path.abspath(usd_path))
-        for dep in layer.GetCompositionAssetDependencies():
-            if not dep or '://' in dep or dep.startswith('omniverse:'):
-                continue
-            full = os.path.normpath(dep if os.path.isabs(dep) else os.path.join(here, dep))
-            if not os.path.exists(full):
-                missing.append(full)
-    lines = [f'{prim_path} 아래에 articulation(ArticulationRootAPI)이 없음.']
-    if not stage.GetPrimAtPath(prim_path).IsValid() or not stage.GetPrimAtPath(prim_path).IsDefined():
-        lines.append(f'  {prim_path} 프림이 정의되지 않음(참조가 안 풀린 over일 가능성).')
-    if missing:
-        lines.append('  찾을 수 없는 참조 파일:')
-        lines += [f'    {m}' for m in missing]
-        lines.append('  → usd를 원래 장면 폴더(robot/, assets/가 옆에 있는 곳)에서 열거나, 그 폴더들을 usd 옆에 복사하세요.')
-    if roots:
-        lines.append(f'  다른 곳의 articulation: {roots} → --prim 으로 지정 가능')
-    sys.exit('\n'.join(lines))
-
-
 if not open_stage(args.usd):
     sys.exit(f'장면 열기 실패: {args.usd}')
-check_articulation(omni.usd.get_context().get_stage(), args.usd, args.prim)
 world = World(stage_units_in_meters=1.0)
 robot = world.scene.add(SingleArticulation(prim_path=args.prim, name='indy'))
 
