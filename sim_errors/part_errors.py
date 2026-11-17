@@ -252,10 +252,14 @@ class PartErrorModel:
                 + sh['base_wave'] * np.sin(2 * np.pi * sh['base_wave_cycles'] * s + sh['base_wave_phase']))
 
     def gap(self, s, s_arc):
+        """틈새. 아크 앞쪽은 용접이 진행된 만큼(s_arc) 닫히고, 멀수록 더 닫힌다(토치 위치에서 절반, 끝에서 최대).
+        아크가 지나간 곳은 지나갈 때의 값으로 굳는다."""
         sh, h = self.scn['shape'], self.scn['heat']
+        s = np.asarray(s, dtype=float)
         g = sh['gap0'] + (sh['gap1'] - sh['gap0']) * s
-        ahead = np.maximum(0.0, s - s_arc) / max(1e-6, 1.0 - s_arc)
-        return np.maximum(0.0, g - h['gap_close'] * s_arc * ahead)
+        ahead = 0.5 + 0.5 * np.maximum(0.0, s - s_arc) / max(1e-6, 1.0 - s_arc)
+        close = np.where(s >= s_arc, s_arc * ahead, 0.5 * s)
+        return np.maximum(0.0, g - h['gap_close'] * close)
 
     def _heat_profile(self, s, s_arc):
         """아크가 지나간 뒤쪽에서 0 → 1로 다가가는 각변형 진행 비율."""
@@ -379,6 +383,66 @@ class PartErrorModel:
             idx += [o + j for j in reversed(range(m))]
             idx += [o + nx * m + j for j in range(m)]
         return np.array(pts), np.array(plate), np.array(counts), np.array(idx)
+
+
+def zero_errors(scn: dict) -> dict:
+    """모든 오차를 0으로 둔 사본 (형상·배치·센서·전문가 설정은 유지, 레이저 노이즈·실패도 0)."""
+    z = copy.deepcopy(scn)
+    z['place'] = {'xyz': [0.0, 0.0, 0.0], 'rpy': [0.0, 0.0, 0.0]}
+    z['icp'] = {'xyz': [0.0, 0.0, 0.0], 'rotvec': [0.0, 0.0, 0.0]}
+    for k in ('web_bow', 'web_wave', 'base_bow', 'base_wave', 'gap0', 'gap1'):
+        z['shape'][k] = 0.0
+    z['shape']['tacks'] = []
+    z['slip'].update(drift=[0.0, 0.0, 0.0], jump=[0.0, 0.0, 0.0])
+    z['heat'].update(base_angle=0.0, web_tilt=0.0, bow=0.0, gap_close=0.0)
+    z['prior'] = {'base_angle': 0.0, 'web_tilt': 0.0, 'bow': 0.0}
+    z['sensors'].update(laser_noise=0.0, laser_dropout=0.0)
+    return z
+
+
+# 오차별 단독 검증: 하나만 크게 과장해서 켠다 (계획 문서 "오차별 단독 검증" 표와 같은 순서)
+SINGLE_ERRORS = {
+    'place': ('지그 배치 오차', {'place': {'xyz': [10 * MM, -10 * MM, 5 * MM], 'rpy': [0.0, 0.0, 3 * DEG]}}),
+    'icp': ('ICP 잔차', {'icp': {'xyz': [0.0, 3 * MM, 0.0], 'rotvec': [0.0, 0.0, 0.0]}}),
+    'web_straightness': ('웹 판 직진도', {'shape': {'web_bow': 5 * MM}}),
+    'base_flatness': ('바닥 판 평평도', {'shape': {'base_bow': 5 * MM}}),
+    'gap': ('루트 틈새', {'shape': {'gap0': 2 * MM, 'gap1': 0.0}}),
+    'tack': ('가접', {'shape': {'tacks': [{'s': s, 'length': 20 * MM, 'height': 3 * MM} for s in (0.25, 0.5, 0.75)]}}),
+    'drift': ('서서히 밀림', {'slip': {'drift': [0.0, 10 * MM, 0.0], 'drift_s0': 0.3, 'drift_span': 0.3}}),
+    'jump': ('갑자기 튐', {'slip': {'jump': [0.0, 5 * MM, 0.0], 'jump_s': 0.5}}),
+    'base_angle': ('바닥 판 각변형', {'heat': {'base_angle': 5 * DEG, 'length': 30 * MM}}),
+    'web_tilt': ('웹 기울어짐', {'heat': {'web_tilt': 3 * DEG, 'length': 30 * MM}}),
+    'bow': ('세로 휨', {'heat': {'bow': 5 * MM}}),
+    'gap_close': ('틈새 닫힘', {'shape': {'gap0': 2 * MM, 'gap1': 2 * MM}, 'heat': {'gap_close': 1.5 * MM}}),
+    'residual': ('잔류 변형 (다음 패스)', {'prior': {'base_angle': 3 * DEG, 'web_tilt': 2 * DEG, 'bow': 3 * MM},
+                                       'pass_index': 1}),
+}
+
+
+def single_error(scn: dict, name: str) -> dict:
+    """오차 하나만 과장해서 켠 시나리오. 나머지 오차는 0."""
+    if name not in SINGLE_ERRORS:
+        raise ValueError(f'알 수 없는 오차: {name} (가능: {", ".join(SINGLE_ERRORS)})')
+    z = zero_errors(scn)
+    for key, val in SINGLE_ERRORS[name][1].items():
+        if isinstance(val, dict):
+            z[key].update(copy.deepcopy(val))
+        else:
+            z[key] = val
+    z['single_error'] = name
+    return z
+
+
+def signature(scn: dict, points=(0.0, 0.25, 0.5, 0.75, 1.0)) -> list[dict]:
+    """토치가 진행도 s에 있을 때(s_arc = s)의 정답 [mm, deg]. 단독 검증에서 그래프와 비교할 기대값."""
+    m = PartErrorModel(copy.deepcopy(scn))
+    out = []
+    for s in points:
+        lab = m.label(s, s)
+        out.append({'s': s, 'e_y': lab['e'][1] / MM, 'e_z': lab['e'][2] / MM,
+                    'work': lab['rotvec'][0] / DEG, 'travel': lab['rotvec'][1] / DEG,
+                    'gap': lab['gap'] / MM, 'tack': lab['tack'] / MM})
+    return out
 
 
 def summarize(scn: dict, n: int = 101) -> dict:

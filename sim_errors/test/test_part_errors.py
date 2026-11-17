@@ -8,8 +8,9 @@ import yaml
 
 from sim_errors.expert import ScriptedExpert, auto_nominal
 from sim_errors.make_scenarios import DEFAULT_CFG
-from sim_errors.part_errors import (MM, WEB, DEG, PartErrorModel, R_SEAM_NOM, load_scenario, next_pass,
-                                    R_to_rotvec, rotvec_to_R, sample_scenario, save_scenario, summarize)
+from sim_errors.part_errors import (MM, WEB, DEG, SINGLE_ERRORS, PartErrorModel, R_SEAM_NOM, load_scenario,
+                                    next_pass, R_to_rotvec, rotvec_to_R, sample_scenario, save_scenario, signature,
+                                    single_error, summarize)
 
 
 @pytest.fixture(scope='module')
@@ -96,8 +97,11 @@ def test_heat_distortion_behind_and_ahead_of_arc(cfg):
     assert m.base_angle(np.array([0.6]), s_arc)[0] == 0.0                       # 아크 앞: 각변형 없음
     far_behind = m.base_angle(np.array([0.0]), s_arc)[0]
     assert np.isclose(far_behind, 1.5 * DEG, rtol=0.01)                         # 아크 한참 뒤: 최종값
-    assert m.gap(np.array([0.4]), s_arc)[0] == pytest.approx(0.001)             # 아크 뒤: 닫힘 없음
+    # 틈새 닫힘: 아크 앞은 진행도만큼(토치 위치에서 절반, 끝에서 최대), 아크 뒤는 지나갈 때 값으로 굳음
     assert m.gap(np.array([1.0]), s_arc)[0] == pytest.approx(0.001 - 0.0008 * 0.5)
+    assert m.gap(np.array([0.5]), s_arc)[0] == pytest.approx(0.001 - 0.0008 * 0.5 * 0.5)   # 토치 위치
+    assert m.gap(np.array([0.4]), s_arc)[0] == pytest.approx(0.001 - 0.0008 * 0.5 * 0.4)
+    assert m.gap(np.array([0.5]), 0.0)[0] == pytest.approx(0.001)                         # 용접 전
     # 세로 휨은 진행도에 비례해 아크 앞쪽도 움직인다
     assert m.label(0.75, 0.5)['e'][2] != 0.0
     assert m.label(0.75, 0.0)['e'][2] == pytest.approx(0.0, abs=1e-12)
@@ -227,3 +231,27 @@ def test_expert_gap_rule(cfg):
     a_big, v_big = ex.process(0.01)
     assert a_big == pytest.approx(scn['expert']['weave_amp_max_mm'] * MM)
     assert v_big == pytest.approx(scn['expert']['travel_speed_mm_s'] * MM * scn['expert']['min_speed_ratio'])
+
+
+def test_single_error_scenarios(cfg):
+    base = sample_scenario(cfg, np.random.default_rng(0))
+    sig = {k: signature(single_error(base, k)) for k in SINGLE_ERRORS}
+    col = lambda k, f: np.array([r[f] for r in sig[k]])   # noqa: E731
+    # 배치 오차는 ICP가 잡으므로 정답 0, ICP 잔차는 일정한 오프셋
+    assert np.allclose(col('place', 'e_y'), 0) and np.allclose(col('place', 'e_z'), 0)
+    assert np.allclose(col('icp', 'e_y'), -3 / math.sqrt(2)) and np.allclose(col('icp', 'e_z'), 3 / math.sqrt(2))
+    # 밀림은 구간 전 0, 끝난 뒤 10 mm / √2, 튐은 계단
+    assert col('drift', 'e_y')[1] == 0 and col('drift', 'e_y')[-1] == pytest.approx(10 / math.sqrt(2))
+    assert col('jump', 'e_y')[1] == 0 and col('jump', 'e_y')[2] == pytest.approx(5 / math.sqrt(2))
+    # 위치를 안 바꾸는 오차: 틈새·가접·틈새 닫힘
+    for k in ('gap', 'tack', 'gap_close'):
+        assert np.allclose(col(k, 'e_y'), 0) and np.allclose(col(k, 'e_z'), 0)
+    assert col('gap_close', 'gap')[-1] < col('gap_close', 'gap')[0]       # 토치가 보는 틈새가 줄어듦
+    # 각변형은 아크 뒤에서만 생겨 한 패스 안의 토치 위치에서는 0, 다음 패스에서는 작업각에 남음
+    assert np.allclose(col('base_angle', 'work'), 0) and np.allclose(col('web_tilt', 'work'), 0)
+    assert np.all(np.abs(col('residual', 'work')) > 0.4)
+    # 단독 시나리오에는 다른 오차가 없음
+    z = single_error(base, 'drift')
+    assert z['shape']['tacks'] == [] and z['heat']['bow'] == 0 and z['icp']['xyz'] == [0.0, 0.0, 0.0]
+    with pytest.raises(ValueError):
+        single_error(base, 'nope')
