@@ -42,10 +42,10 @@ in_weld:                   # 용접 중. 모두 아크 진행도 s_arc(0~1)의 �
   bow_mm: 1.5                  # 세로 휨 최종 처짐 (진행도에 비례해 자람, 아크 앞쪽도 움직임), ±
   gap_close_mm: [0.0, 1.0]     # 아크 앞쪽 틈새 닫힘 최대량
 
-sensors:
-  laser_lookahead_mm: 30   # 레이저 라인 센서 측정점: 토치 앞 거리
-  laser_noise_mm: 0.1      # 표준편차
-  laser_dropout: 0.05      # 측정 실패 확률 (스패터·연기)
+sensors:                   # laser_* = 토치 앞 이음매 단면 센서 모델. 실기(아크 없는 시연)에서는 손목 depth 카메라 단면에 해당
+  laser_lookahead_mm: 30   # 단면 측정점: 토치 앞 거리
+  laser_noise_mm: 0.1      # 표준편차. 실제 depth 카메라로 시연 시편을 재서 맞출 것
+  laser_dropout: 0.05      # 측정 실패 확률 (금속 반사로 생기는 측정 구멍)
 
 expert:                    # 규칙 전문가 (privileged: 실제 경로를 안다)
   travel_speed_mm_s: 5.0
