@@ -177,6 +177,7 @@ def plot(rows: dict, scn: dict, path: str) -> str | None:
         if any(name in f.name for f in matplotlib.font_manager.fontManager.ttflist):
             plt.rcParams['font.family'] = name
             break
+    plt.rcParams['axes.unicode_minus'] = False   # 한글 글꼴에 없는 유니코드 빼기 기호 대신 '-' 사용
     look = scn['sensors']['laser_lookahead'] / scn['geometry']['length']
     fig, ax = plt.subplots(4, 1, figsize=(9, 11), sharex=True)
     ax[0].plot(s, e[:, 1], label='정답 좌우 e_y')
