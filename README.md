@@ -149,3 +149,4 @@ $$
 - [weld_teleop/README.md](weld_teleop/README.md): ROS2 텔레옵 노드 구성과 실행 방법.
 - [sim_bridge/README.md](sim_bridge/README.md): 리더 암으로 Isaac Sim 안의 opti3를 움직이는 구성과 실행 방법.
 - [sim_errors/README.md](sim_errors/README.md): Isaac Sim 모재 오차 시나리오와 규칙 전문가 에피소드 생성.
+- [learning/README.md](learning/README.md): 에피소드 묶음 → LeRobotDataset 변환 → MLP/GRU 행동 복제 → 보정 0 대비 평가.

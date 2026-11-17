@@ -1,0 +1,108 @@
+"""생성 → 변환 → 학습 → 평가 흐름 (짧은 이음매의 운동학 에피소드로, Isaac 없이)."""
+import copy
+import os
+
+import numpy as np
+import pytest
+import yaml
+
+from learning.features import (ACTION_NAMES, BUF_OFFSETS_MM, OBS_NAMES, SectionBuffer, episode_frames,
+                               load_episode, obs_index, torch_offset)
+from learning.to_lerobot import convert
+from sim_errors.episode import run_kinematic
+from sim_errors.expert import apply_offset
+from sim_errors.make_scenarios import DEFAULT_CFG, make_batch
+from sim_errors.part_errors import DEG, MM, PartErrorModel
+
+
+def test_section_buffer_distance_indexing():
+    buf = SectionBuffer(0.3)                      # 300 mm 이음매
+    for x_mm in np.arange(0, 60, 0.5):            # 0~60 mm에서 잰 값: 좌우 = 위치(mm) × 0.001 m
+        buf.add(x_mm / 300, [x_mm * MM * 0.01, 0.0, 0.001])
+    vals, valid = buf.query(40 / 300)             # 토치 40 mm: 질의점 30, 35, ..., 70 mm
+    exp = (40 + BUF_OFFSETS_MM) * 0.01
+    ok = 40 + BUF_OFFSETS_MM < 62              # 마지막 측정 59.5 mm에서 2.5 mm 안까지
+    assert np.array_equal(valid.astype(bool), ok)
+    assert np.allclose(vals[ok, 0], exp[ok], atol=0.006)
+    assert np.allclose(vals[ok, 2], 1.0)
+    buf.add(45 / 300, [np.nan] * 3)               # 측정 실패는 무시
+    assert buf.query(40 / 300)[1].sum() == ok.sum()
+
+
+def test_torch_offset_inverts_apply_offset():
+    with open(DEFAULT_CFG, encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
+    scn = make_batch(cfg, {'clean': 1, 'single': 0, 'mixed': 0, 'hard': 0})[0][1]
+    m = PartErrorModel(scn)
+    from sim_errors.expert import ScriptedExpert
+    ex = ScriptedExpert(m, np.eye(4))
+    T = ex.seam_pose(0.4, 0.4, ex.ex['standoff_mm'] * MM)
+    o = [0.8 * MM, -0.5 * MM, 1.5 * DEG, -1.0 * DEG]
+    got = torch_offset(m, 0.4, apply_offset(T, m.label(0.4, 0.4)['R_true'], o))
+    assert np.allclose(got, [0.8, -0.5, 1.5, -1.0], atol=1e-3)
+
+
+@pytest.fixture(scope='module')
+def small_batch(tmp_path_factory):
+    with open(DEFAULT_CFG, encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
+    root = tmp_path_factory.mktemp('loop')
+    ep_dir = root / 'episodes'
+    ep_dir.mkdir()
+    batch = make_batch(cfg, {'clean': 2, 'single': 2, 'mixed': 10, 'hard': 2}, seed=7)
+    for k, (name, scn) in enumerate(batch):
+        scn = copy.deepcopy(scn)
+        scn['geometry']['length'] = 0.06                 # 12초 용접
+        run_kinematic(scn, sensor_seed=k).save(str(ep_dir / name.replace('.json', '.npz')), scn)
+    return root, ep_dir
+
+
+def test_frames_shapes(small_batch):
+    _, ep_dir = small_batch
+    rows, scn, meta = load_episode(str(ep_dir / 'mixed_0001.npz'))
+    obs, act, ts = episode_frames(rows, scn)
+    assert obs.shape[1] == len(OBS_NAMES) == 43 and act.shape[1] == len(ACTION_NAMES) == 7
+    assert len(obs) == pytest.approx(rows['t'][-1] * 10, abs=2)
+    assert np.allclose(np.diff(ts), 0.1, atol=0.011)
+    assert meta['mode'] == scn['episode']['mode']
+    # 행동 정답 = 기록된 전문가 정답 (mm, deg)
+    assert np.allclose(act[:, 4], rows['speed'][0] / MM, rtol=0.5)
+    # 단면 버퍼 유효 표시는 0/1, 토치 앞 30 mm 점은 대부분 유효
+    valid = obs[:, obs_index(['section'])][:, 27:]
+    assert set(np.unique(valid)) <= {0.0, 1.0} and valid[:, -1].mean() > 0.4   # 60 mm 이음매라 끝 30 mm는 앞이 없음
+
+
+def test_convert_train_evaluate(small_batch):
+    torch = pytest.importorskip('torch')  # noqa: F841
+    from learning.evaluate import evaluate
+    from learning.train_bc import Policy, train
+    root, ep_dir = small_batch
+    data = str(root / 'data')
+    r = convert(str(ep_dir), data, lerobot=False)
+    assert r['episodes'] == 16 and r['splits']['train'] and r['splits']['test']
+    for model in ('mlp', 'gru'):
+        out = str(root / model)
+        res = train(data, out, model=model, epochs=3, seq=8, verbose=False)
+        assert np.isfinite(res['best_val'])
+        pol = Policy(os.path.join(out, 'policy.pt'))
+        a = pol(np.zeros(43, dtype=np.float32))
+        assert a.shape == (7,) and np.all(np.isfinite(a))
+        ev = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False)
+        assert ev['closed_loop']['all']['done'] == 1.0
+        assert set(ev['open_loop']) == set(ACTION_NAMES)
+    # 입력 묶음을 줄여도 학습·실행
+    out = str(root / 'notorch')
+    train(data, out, model='mlp', groups=('section', 'progress', 'mode'), epochs=2, verbose=False)
+    assert Policy(os.path.join(out, 'policy.pt'))(np.zeros(43, dtype=np.float32)).shape == (7,)
+
+
+def test_failed_episodes_are_skipped(small_batch, tmp_path):
+    import json
+    import shutil
+    _, ep_dir = small_batch
+    d = tmp_path / 'eps'
+    shutil.copytree(ep_dir, d)
+    with open(d / 'batch_report.json', 'w', encoding='utf-8') as f:
+        json.dump({'episodes': [{'file': 'mixed_0000.npz', 'ok': False, 'reason': '시험'}]}, f)
+    r = convert(str(d), str(tmp_path / 'data'), lerobot=False)
+    assert r['episodes'] == 15 and r['skipped'] == [('mixed_0000.npz', '시험')]

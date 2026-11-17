@@ -62,3 +62,22 @@ expert:                    # 규칙 전문가 (privileged: 실제 경로를 안�
   approach_speed_mm_s: 50
   descend_speed_mm_s: 15
   retract_height_mm: 50
+
+episode:                   # 학습용 묶음 (에피소드 생성 사양 "에피소드 구성"). make_scenarios --batch가 사용
+  counts: {clean: 30, single: 65, mixed: 205, hard: 30}   # 시편군당. 단독 = 오차 13종 × 5
+  hard_scale: 1.5          # 가혹 묶음(평가 전용): 오차 범위 × 이 값
+  split: [0.8, 0.1, 0.1]   # 학습 · 검증 · 시험, 에피소드(시드) 단위. 가혹은 모두 평가
+  weave_ratio: 0.5         # 위빙 모드 에피소드 비율 (나머지는 직선 모드: 위빙 0, 속도만 보정)
+  perturb_ratio: 0.5       # 혼합 묶음에서 실행 섭동을 넣는 비율
+  start_offset:            # 시작 토치 어긋남, ± 균등 (이음매 시작점 근처에 바로 놓음)
+    lateral_mm: 2.0
+    height_mm: 2.0
+    work_deg: 2.0
+    travel_deg: 2.0
+  start_settle_s: 0.3      # 시작 어긋남을 실행 명령에서 지수로 줄이는 시간상수 (정답에는 없음)
+  perturb:                 # 실행 섭동 (DART 방식): 라벨은 섭동 없는 전문가 값
+    lateral_mm: 0.5        # 표준편차
+    height_mm: 0.5
+    angle_deg: 1.0         # 작업각·진행각 표준편차
+    duration_s: [0.5, 2.0] # 한 번 지속 (반 코사인 창)
+    interval_s: [1.0, 4.0] # 섭동 사이 쉬는 시간
