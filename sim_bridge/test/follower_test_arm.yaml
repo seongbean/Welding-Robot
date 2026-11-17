@@ -1,0 +1,12 @@
+# 시험용 팔(test_arm.urdf) 팔로워 설정. follower_opti3.yaml과 같은 값, 툴 오프셋만 0
+follower_ik_node:
+  ros__parameters:
+    joint_names: [joint0, joint1, joint2, joint3, joint4, joint5]
+    ee_frame: tcp
+    tool_xyz: [0.0, 0.0, 0.0]
+    tool_rpy: [0.0, 0.0, 0.0]
+    max_joint_step: 0.01
+    ik_tolerance: 0.001
+    ik_accept_error: 0.02
+    max_track_error: 0.1
+    input_timeout: 0.2

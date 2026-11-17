@@ -6,13 +6,14 @@
   python -m sim_errors.check_episode episodes/*.npz --no-plot      # 여러 개, 표만
 
 점검 항목 (통과/주의/실패)
-  1. 단계 순서      approach → descend → weld → retract → 완료
+  1. 단계 순서      approach → descend → weld → retract → 완료 (용접 구간만 담은 에피소드는 weld → 완료)
   2. IK 상태        FollowerStepper 상태가 ok인 비율 (approx·ik_failed·tracking_error 등은 주의)
   3. 진행도         s가 줄지 않고 1까지 감
   4. 정답 재계산    기록된 정답(e, rotvec, 틈새)이 시나리오로 다시 계산한 값과 같음
-  5. 목표 기하      용접 중 토치 목표 = 실제 이음매 + standoff(+가접) + 위빙, 토치 방향 = 이음매 쪽 + 미는 각
+  5. 목표 기하      용접 중 전문가 목표 = 실제 이음매 + standoff(+가접) + 위빙, 토치 방향 = 이음매 쪽 + 미는 각,
+                    보낸 목표 = 전문가 목표 + 기록된 어긋남(시작 어긋남·섭동)
   6. 추종 오차      실측 관절로 구한 토치 팁(T_meas)과 목표(T_target)의 차이. 로봇이 실제로 따라갔는지
-  7. 레이저         측정 실패율, 측정값과 정답의 차이가 노이즈 수준인지
+  7. 단면 센서      측정 실패율, 좌우·높이·틈새 폭 측정값과 정답의 차이가 노이즈 수준인지
   8. 용접 시간      이음매 길이 / 속도와 맞는지
 그래프(matplotlib 있으면): 진행도에 따른 정답·레이저, 각도, 틈새·위빙·속도, 추종 오차 → <npz 이름>.png
 
@@ -29,6 +30,7 @@ import sys
 
 import numpy as np
 
+from .expert import apply_offset
 from .part_errors import DEG, MM, PartErrorModel, R_to_rotvec
 
 OK, WARN, FAIL = '통과', '주의', '실패'
@@ -53,7 +55,10 @@ def check(rows: dict, scn: dict, track_tol_mm: float = 2.0) -> list[tuple[str, s
     # 1. 단계 순서 (이전 기록은 단계가 바뀌는 주기를 다음 단계 이름으로 적어서 끝에 done이 있음)
     seq = [p for i, p in enumerate(phase) if i == 0 or p != phase[i - 1]]
     finished = 'done' in seq or ('done' in rows and bool(rows['done'][-1]))
-    if seq[:4] == PHASES[:4] and finished:
+    if seq[0] == 'weld':                      # 용접 구간만 담은 에피소드
+        out.append(('단계 순서', OK if seq in (['weld'], ['weld', 'done']) and finished else FAIL,
+                    'weld → 완료 (용접 구간만)' if finished else f'{" → ".join(seq)}, 완료 안 됨'))
+    elif seq[:4] == PHASES[:4] and finished:
         out.append(('단계 순서', OK, ' → '.join(seq[:4]) + ' → 완료'))
     elif seq == PHASES[:len(seq)]:
         out.append(('단계 순서', FAIL, f'{seq[-1]}에서 끝남 (중단 또는 IK 실패)'))
@@ -96,20 +101,24 @@ def check(rows: dict, scn: dict, track_tol_mm: float = 2.0) -> list[tuple[str, s
     # 5. 목표 기하
     standoff = ex['standoff_mm'] * MM
     cos_travel = math.cos(ex['travel_angle_deg'] * DEG)
-    worst_lift = worst_lat = worst_x = worst_ang = 0.0
+    worst_lift = worst_lat = worst_x = worst_ang = worst_cmd = 0.0
+    T_exp = rows.get('T_expert', rows['T_target'])
     for i in idx:
         lab = labs[int(i)]
-        R, T = lab['R_true'], rows['T_target'][i]
+        R, T = lab['R_true'], T_exp[i]
+        if 'perturb' in rows:
+            Tc = apply_offset(T, R, rows['perturb'][i])
+            worst_cmd = max(worst_cmd, float(np.abs(Tc - rows['T_target'][i]).max()))
         d = T[:3, 3] - lab['p_true']
         lift = standoff + ex['tack_follow'] * lab['tack']
         worst_lift = max(worst_lift, abs(float(d @ R[:, 2]) - lift))
         worst_lat = max(worst_lat, abs(float(d @ R[:, 1])) - float(rows['weave_amp'][i]))
         worst_x = max(worst_x, abs(float(d @ R[:, 0])))
         worst_ang = max(worst_ang, abs(float(T[:3, 2] @ -R[:, 2]) - cos_travel))
-    good = worst_lift < 1e-6 and worst_lat < 1e-6 and worst_x < 1e-6 and worst_ang < 1e-6
+    good = worst_lift < 1e-6 and worst_lat < 1e-6 and worst_x < 1e-6 and worst_ang < 1e-6 and worst_cmd < 1e-6
     out.append(('목표 기하', OK if good else FAIL,
                 f'높이 {worst_lift / MM:.1e} mm, 위빙 초과 {max(0.0, worst_lat) / MM:.1e} mm, '
-                f'진행 방향 {worst_x / MM:.1e} mm, 토치 각 {worst_ang:.1e}'))
+                f'진행 방향 {worst_x / MM:.1e} mm, 토치 각 {worst_ang:.1e}, 어긋남 적용 {worst_cmd:.1e}'))
 
     # 6. 추종 오차
     pos, ang = tracking_error(rows)
@@ -118,28 +127,32 @@ def check(rows: dict, scn: dict, track_tol_mm: float = 2.0) -> list[tuple[str, s
     out.append(('추종 오차 (용접 중)', level,
                 f'위치 중앙 {np.median(pos[idx]):.2f} / 95% {p95:.2f} / 최대 {pmax:.2f} mm, 각도 95% {a95:.2f} deg'))
 
-    # 7. 레이저
+    # 7. 단면 센서 (코드 이름 laser): [좌우, 높이(+가접), 틈새 폭]. 이전 기록은 두 열
     las = rows['laser'][idx]
     valid = np.isfinite(las[:, 0])
     look = scn['sensors']['laser_lookahead'] / m.L
     in_range = s[idx] + look <= 1.0
     drop = 1.0 - float(np.mean(valid[in_range])) if in_range.any() else float('nan')
     exp_drop = scn['sensors']['laser_dropout']
-    res = []
+    noise = scn['sensors']['laser_noise']
+    res, res_gap = [], []
     for k in np.flatnonzero(valid):
         i = idx[k]
         lab = m.label(float(s[i]) + look, float(rows['s_arc'][i]))
-        res.append(las[k] - np.array([lab['e'][1], lab['e'][2] + lab['tack']]))
-    noise = scn['sensors']['laser_noise']
+        res.append(las[k, :2] - np.array([lab['e'][1], lab['e'][2] + lab['tack']]))
+        if las.shape[1] > 2 and lab['gap'] > 3 * noise:   # 틈새 0 근처는 0에서 잘려 편향되므로 제외
+            res_gap.append(las[k, 2] - lab['gap'])
     if res:
         sd = np.std(np.array(res), axis=0)
+        sd_gap = float(np.std(res_gap)) if res_gap else 0.0
         good = abs(drop - exp_drop) < max(0.05, 3 * math.sqrt(exp_drop * (1 - exp_drop) / max(1, in_range.sum())))
-        good = good and np.all(sd < 2 * noise + 1e-6)
-        out.append(('레이저', OK if good else WARN,
+        good = good and np.all(sd < 2 * noise + 1e-6) and sd_gap < 2 * noise + 1e-6
+        gap_txt = f' 틈새 {sd_gap / MM:.3f}' if las.shape[1] > 2 else ''
+        out.append(('단면 센서', OK if good else WARN,
                     f'실패율 {drop * 100:.1f}% (설정 {exp_drop * 100:.0f}%), 정답 대비 표준편차 '
-                    f'좌우 {sd[0] / MM:.3f} 높이 {sd[1] / MM:.3f} mm (설정 {noise / MM:.3f})'))
+                    f'좌우 {sd[0] / MM:.3f} 높이 {sd[1] / MM:.3f}{gap_txt} mm (설정 {noise / MM:.3f})'))
     else:
-        out.append(('레이저', WARN, '유효 측정 없음'))
+        out.append(('단면 센서', WARN, '유효 측정 없음'))
 
     # 8. 용접 시간
     t = rows['t']
@@ -182,13 +195,15 @@ def plot(rows: dict, scn: dict, path: str) -> str | None:
     fig, ax = plt.subplots(4, 1, figsize=(9, 11), sharex=True)
     ax[0].plot(s, e[:, 1], label='정답 좌우 e_y')
     ax[0].plot(s, e[:, 2], label='정답 높이 e_z')
-    ax[0].plot(s + look, las[:, 0], '.', ms=2, alpha=0.5, label='레이저 좌우 (측정 위치)')
-    ax[0].plot(s + look, las[:, 1], '.', ms=2, alpha=0.5, label='레이저 높이+가접 (측정 위치)')
+    ax[0].plot(s + look, las[:, 0], '.', ms=2, alpha=0.5, label='단면 좌우 (측정 위치)')
+    ax[0].plot(s + look, las[:, 1], '.', ms=2, alpha=0.5, label='단면 높이+가접 (측정 위치)')
     ax[0].set_ylabel('mm')
     ax[1].plot(s, r[:, 0], label='작업각 보정')
     ax[1].plot(s, r[:, 1], label='진행각 보정')
     ax[1].set_ylabel('deg')
     ax[2].plot(s, rows['gap'][weld] / MM, label='틈새 [mm]')
+    if las.shape[1] > 2:
+        ax[2].plot(s + look, las[:, 2], '.', ms=2, alpha=0.4, label='단면 틈새 폭 (측정 위치)')
     ax[2].plot(s, rows['weave_amp'][weld] / MM, label='위빙 진폭 [mm]')
     ax[2].plot(s, rows['speed'][weld] / MM, label='진행 속도 [mm/s]')
     ax[2].plot(s, rows['tack'][weld] / MM, label='가접 높이 [mm]')

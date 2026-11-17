@@ -2,25 +2,27 @@
 """규칙 전문가 → Isaac Sim opti3: 모재 오차 시나리오 하나로 에피소드 1개를 만들고 정답을 기록한다.
 
 규칙 전문가(sim_errors/expert.py)가 실제 이음매를 따라 토치 목표를 만들고, opti3 IK(FollowerStepper)로
-관절 목표를 계산해 isaac_opti3_receiver.py에 보낸다. 패킷에 아크 진행도(s_arc)와 모재 배치를 함께 보내므로
-receiver(--scenario 같은 파일)가 모재 변형을 같은 진행도로 그린다.
+관절 목표를 계산해 isaac_opti3_receiver.py에 보낸다. 패킷에 시나리오 경로, 아크 진행도(s_arc), 모재 배치를
+함께 보내므로 receiver가 재시작 없이 모재를 바꾸고 변형을 같은 진행도로 그린다. 여러 개는 run_batch.py.
 
 사용법 (저장소 루트에서, pinocchio가 설치된 conda 환경)
-  python -m sim_errors.make_scenarios --n 20 --out scenarios
-  터미널 1: C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd ...\\posco_torch.usd --scenario scenarios\\part0000_pass0.json
+  터미널 1: C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd ...\\posco_torch.usd
   터미널 2: python sim_bridge/expert_to_sim.py --scenario scenarios/part0000_pass0.json --follower-urdf C:/.../opti3.urdf
 
-- 모재 배치: 기본은 시작 자세의 토치 팁 근처에 자동 배치(이음매 방향 = 베이스 -Y). 시나리오의 nominal_pose를
-  쓰려면 --use-scenario-pose.
+- 시간: receiver가 보내는 시뮬 시각으로 전문가를 진행한다. 실측 하나에 한 주기라서, Isaac이 멈추면 전문가도
+  멈춘다(joint_state_timeout 동안 진행도가 토치보다 앞서가던 문제). 시각이 없는 이전 receiver면 받은 시각 사용.
+- 모재 배치: 홈 자세(--home-q, receiver --initial-q와 같아야 함)의 토치 팁 근처에 고정 배치(이음매 방향 = 베이스 -Y).
+  시나리오의 nominal_pose를 쓰려면 --use-scenario-pose.
 - 시작 전에 이음매 전체에 대해 IK 도달 여부를 확인하고, 안 되면 시작하지 않는다.
-- 기록: --out(기본 episodes/<시나리오 이름>.npz). 정답(e, rotvec, 틈새, 위빙, 속도), 레이저 측정, 목표 포즈,
-  관절 명령·실측, 실측 툴 포즈. 각 필드 설명은 sim_errors/README.md.
+- 용접 구간만 담는 시나리오(episode.weld_only, make_scenarios --batch)는 로봇을 이음매 시작점 + 시작 어긋남
+  관절 자세로 바로 놓고(reset_q) 자리 잡으면 용접부터 시작한다. 아니면 지금 자세에서 접근부터 한다.
+- 기록: --out(기본 episodes/<시나리오 이름>.npz). 필드 설명은 sim_errors/README.md.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
+import select
 import socket
 import sys
 import time
@@ -35,11 +37,14 @@ for p in (REPO, PKG):
 
 import pinocchio as pin  # noqa: E402
 
+from sim_errors.episode import Recorder  # noqa: E402
 from sim_errors.expert import ScriptedExpert, auto_nominal  # noqa: E402
 from sim_errors.part_errors import PartErrorModel, load_scenario  # noqa: E402
 from weld_teleop.follower_control import FollowerStepper  # noqa: E402
 from weld_teleop.kinematics import ChainKinematics, se3_from_xyz_rpy, se3_to_xyzquat  # noqa: E402
 from weld_teleop.teleop_loop import decode, encode, ros_params  # noqa: E402
+
+HOME_Q = '0,-0.5236,1.7453,0,0.8727,0'    # isaac_opti3_receiver.py --initial-q 기본값
 
 
 def addr(s: str) -> tuple[str, int]:
@@ -61,33 +66,157 @@ def to_se3(T: np.ndarray) -> pin.SE3:
 
 
 def check_reach(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, n: int = 21):
-    """이음매 전체(가장 변형된 상태 s_arc=s)에 IK가 닿는지 미리 확인. 반환: 실패한 s 목록."""
+    """이음매 전체(가장 변형된 상태 s_arc=s)에 IK가 닿는지 미리 확인. 반환: (실패한 s 목록, 시작점 관절 자세)."""
     q = q0.copy()
-    bad = []
+    bad, q_first = [], None
     lift = expert.ex['standoff_mm'] * 1e-3
     for s in np.linspace(0, 1, n):
         q_sol, ok, err = kin.ik(to_se3(expert.seam_pose(s, s, lift)), q, iters=100)
         if ok or err <= tol:
             q = q_sol
+            if q_first is None and s == 0:
+                q_first = q_sol.copy()
         else:
             bad.append((round(float(s), 2), round(err, 4)))
-    return bad
+    return bad, q_first
 
 
-class Recorder:
-    def __init__(self):
-        self.rows: dict[str, list] = {}
+class SimLink:
+    """receiver와의 UDP 연결. 실측 메시지: q, rx, (새 receiver) seq, t(시뮬 시각), reset_id."""
 
-    def add(self, **kw):
-        for k, v in kw.items():
-            self.rows.setdefault(k, []).append(v)
+    def __init__(self, listen: str, send: str, nq: int):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(addr(listen))
+        self.sock.setblocking(False)
+        self.dest = addr(send)
+        self.nq = nq
+        self.t0_wall = time.monotonic()
 
-    def save(self, path: str, scn: dict):
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        out = {}
-        for k, v in self.rows.items():
-            out[k] = np.array(v) if k != 'phase' else np.array(v, dtype='U8')
-        np.savez_compressed(path, scenario_json=json.dumps(scn), **out)
+    def recv_latest(self, timeout: float = 0.5) -> dict | None:
+        """쌓인 실측 중 마지막 것 (없으면 timeout까지 기다림). 시뮬 시각이 없으면 받은 시각."""
+        r, _, _ = select.select([self.sock], [], [], timeout)
+        if not r:
+            return None
+        last = None
+        while True:
+            try:
+                data, _ = self.sock.recvfrom(65536)
+            except (BlockingIOError, ConnectionResetError):
+                break
+            msg = decode(data, self.nq)
+            if msg is not None:
+                last = msg
+        if last is not None and 't' not in last:
+            last['t'] = time.monotonic() - self.t0_wall
+        return last
+
+    def send(self, q, **extra) -> None:
+        self.sock.sendto(encode(q, **extra), self.dest)
+
+    def close(self):
+        self.sock.close()
+
+
+def place_robot(link: SimLink, q_start: np.ndarray, scene: dict, reset_id: int, tol: float = 2e-3,
+                settle: int = 15, timeout: float = 20.0) -> bool:
+    """receiver에 관절 자세를 바로 놓게 하고(reset_q), 실측이 settle번 연속 tol 안이면 True."""
+    t_end = time.monotonic() + timeout
+    good = 0
+    t_send = 0.0
+    while time.monotonic() < t_end:
+        if time.monotonic() - t_send > 0.1:
+            link.send(q_start, reset_q=[float(x) for x in q_start], reset_id=reset_id, scene=scene)
+            t_send = time.monotonic()
+        msg = link.recv_latest(0.1)
+        if msg is None:
+            continue
+        if msg.get('reset_id', reset_id) != reset_id:      # 이전 receiver는 reset_id를 안 보냄
+            continue
+        good = good + 1 if np.max(np.abs(msg['q'] - q_start)) < tol else 0
+        if good >= settle:
+            return True
+    return False
+
+
+def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_path: str, *, home_q: np.ndarray,
+                use_scenario_pose: bool = False, sensor_seed: int = 0, reset_id: int = 1, max_time: float = 400.0,
+                log=print) -> tuple[Recorder, dict, str]:
+    """에피소드 하나. 반환 (기록, 모재 배치가 반영된 시나리오, 결과: done | reach | place | ik_failed | timeout | stopped)."""
+    kin = stepper.kin
+    model = PartErrorModel(scn)
+    T_home = kin.fk(home_q).homogeneous
+    if not use_scenario_pose:
+        model.set_nominal(auto_nominal(T_home, model.L))
+    expert = ScriptedExpert(model, T_home, np.random.default_rng(sensor_seed))
+    rec = Recorder()
+    bad, q_seam0 = check_reach(kin, expert, home_q, stepper.accept)
+    if bad:
+        log(f'IK 도달 실패 (s, 오차): {bad}')
+        return rec, model.scn, 'reach'
+    scene = {'scenario': os.path.abspath(scenario_path), 's_arc': 0.0, 'T_nominal': model.scn['T_nominal'],
+             'phase': expert.phase}
+
+    msg = None
+    if expert.weld_only:
+        q_start, ok, err = kin.ik(to_se3(expert.start_pose()), q_seam0, iters=200)
+        if not (ok or err <= stepper.tol):
+            log(f'시작 자세 IK 실패 (오차 {err:.4f})')
+            return rec, model.scn, 'reach'
+        if not place_robot(link, q_start, scene, reset_id):
+            log('로봇을 시작 자세에 놓지 못함 (receiver가 reset_q를 지원하는지, 실행 중인지 확인)')
+            return rec, model.scn, 'place'
+        stepper.q_cmd = q_start.copy()
+        stepper.q_ik = q_start.copy()
+    else:
+        link.send(home_q, scene=scene)
+    stepper.target = None
+
+    t_prev = None
+    t_print = 0.0
+    result = 'timeout'
+    t_wall_end = time.monotonic() + max_time
+    while time.monotonic() < t_wall_end:
+        msg = link.recv_latest(1.0)
+        if msg is None:
+            log('\rIsaac Sim 실측 대기 중…' + ' ' * 40)
+            continue
+        if msg.get('reset_id', reset_id) != reset_id:
+            continue
+        t = float(msg['t'])
+        stepper.on_measured(msg['q'], t)
+        if t_prev is None:
+            t_prev = t
+            if not expert.weld_only and stepper.q_cmd is None:
+                stepper.set_initial(msg['q'])
+            continue
+        dt = t - t_prev
+        if dt <= 0:
+            continue
+        t_prev = t
+        r = expert.step(min(dt, 0.05))
+        stepper.on_target(to_se3(r['T_target']), t)
+        q = stepper.step(t)
+        scene.update(s_arc=r['s_arc'], phase=r['phase'])
+        q_send = q if q is not None else stepper.q_cmd    # 명령을 못 내도 응답(ack)은 보냄 (잠금 단계)
+        if q_send is not None:
+            link.send(q_send, target=se3_to_xyzquat(to_se3(r['T_target'])).tolist(), scene=scene,
+                      ack=msg.get('seq'), reset_id=reset_id)
+        T_meas = kin.fk(stepper.q_meas).homogeneous
+        rec.add_expert(r, T_meas=T_meas, q_cmd=q if q is not None else np.full(kin.nq, np.nan),
+                       q_meas=stepper.q_meas.copy(), status=stepper.status, t_sim=t)
+        if stepper.status == 'ik_failed':
+            log(f'\nIK 실패로 중단 ({stepper.detail}), 진행도 {r["s"]:.3f}')
+            result = 'ik_failed'
+            break
+        if expert.done:
+            result = 'done'
+            break
+        if time.monotonic() - t_print > 0.2:
+            err = np.linalg.norm(T_meas[:3, 3] - r['T_target'][:3, 3]) * 1e3
+            log(f'\r{r["phase"]:<8} s {r["s"]:.3f} | 좌우 {r["e"][1] * 1e3:+5.2f} 높이 {r["e"][2] * 1e3:+5.2f} mm'
+                f' | 틈새 {r["gap"] * 1e3:4.2f} mm | 추종 오차 {err:5.1f} mm | {stepper.status:<10}', end='', flush=True)
+            t_print = time.monotonic()
+    return rec, model.scn, result
 
 
 def main():
@@ -100,91 +229,33 @@ def main():
     ap.add_argument('--scenario', required=True, help='make_scenarios.py가 만든 JSON')
     ap.add_argument('--follower-urdf', required=True, help='opti3.urdf 경로')
     ap.add_argument('--follower-config', default=os.path.join(PKG, 'config', 'follower_opti3.yaml'))
-    ap.add_argument('--use-scenario-pose', action='store_true', help='자동 배치 대신 시나리오의 nominal_pose 사용')
+    ap.add_argument('--use-scenario-pose', action='store_true', help='고정 자동 배치 대신 시나리오의 nominal_pose 사용')
+    ap.add_argument('--home-q', default=HOME_Q, help='rad, receiver --initial-q와 같게 (모재 배치 기준)')
     ap.add_argument('--send', default='127.0.0.1:9870')
     ap.add_argument('--listen', default='127.0.0.1:9871')
-    ap.add_argument('--rate', type=float, default=100.0)
-    ap.add_argument('--sensor-seed', type=int, default=0, help='레이저 노이즈 난수 시드')
+    ap.add_argument('--sensor-seed', type=int, default=0, help='단면 센서 노이즈 난수 시드')
     ap.add_argument('--out', help='기록 파일 (.npz). 기본 episodes/<시나리오 이름>.npz')
     args = ap.parse_args()
 
     scn = load_scenario(args.scenario)
-    model = PartErrorModel(scn)
     stepper = build_stepper(args.follower_config, args.follower_urdf)
-    kin = stepper.kin
     out_path = args.out or os.path.join('episodes', os.path.splitext(os.path.basename(args.scenario))[0] + '.npz')
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(addr(args.listen))
-    sock.setblocking(False)
-    dest = addr(args.send)
-
+    link = SimLink(args.listen, args.send, stepper.kin.nq)
     print(f'시나리오 {args.scenario} (패스 {scn.get("pass_index", 0)}) → Isaac Sim {args.send}')
-    print('Isaac Sim 실측값을 기다리는 중… (receiver를 같은 --scenario로 실행)')
-    expert = None
-    rec = Recorder()
-    dt = 1.0 / args.rate
-    t_next = time.monotonic()
-    t_print = 0.0
+    rec, scn_out, result = Recorder(), scn, 'stopped'
     try:
-        while True:
-            now = time.monotonic()
-            while True:
-                try:
-                    data, _ = sock.recvfrom(65536)
-                except (BlockingIOError, ConnectionResetError):
-                    break
-                msg = decode(data, kin.nq)
-                if msg is not None:
-                    stepper.on_measured(msg['q'], now)
-
-            if expert is None and stepper.q_meas is not None:
-                T0 = kin.fk(stepper.q_meas).homogeneous
-                if not args.use_scenario_pose:
-                    model.set_nominal(auto_nominal(T0, model.L))
-                expert = ScriptedExpert(model, T0, np.random.default_rng(args.sensor_seed))
-                print(f'시작 토치 팁 [m]: {np.round(T0[:3, 3], 3).tolist()}')
-                bad = check_reach(kin, expert, stepper.q_meas, stepper.accept)
-                if bad:
-                    print(f'IK 도달 실패 (s, 오차): {bad}\n모재 배치(nominal_pose 또는 시작 자세)를 바꿔 다시 실행하세요.')
-                    return
-                print('이음매 전체 IK 도달 확인. 시작합니다.')
-
-            if expert is not None:
-                r = expert.step(dt)
-                stepper.on_target(to_se3(r['T_target']), now)
-                q = stepper.step(now)
-                scene = {'s_arc': r['s_arc'], 'T_nominal': model.scn['T_nominal'], 'phase': r['phase']}
-                if q is not None:
-                    sock.sendto(encode(q, target=se3_to_xyzquat(to_se3(r['T_target'])).tolist(), scene=scene), dest)
-                T_meas = kin.fk(stepper.q_meas).homogeneous
-                rec.add(t=r['t'], phase=r['phase'], arc_on=r['arc_on'], done=r['done'], s=r['s'], s_arc=r['s_arc'],
-                        e=r['e'], rotvec=r['rotvec'], gap=r['gap'], tack=r['tack'],
-                        weave_amp=r['weave_amp'], weave_hz=r['weave_hz'], speed=r['speed'], laser=r['laser'],
-                        p_true=r['p_true'], p_est=r['p_est'], T_target=r['T_target'], T_meas=T_meas,
-                        q_cmd=q if q is not None else np.full(kin.nq, np.nan), q_meas=stepper.q_meas.copy(),
-                        status=stepper.status)
-                if stepper.status == 'ik_failed':
-                    print(f'\nIK 실패로 중단 ({stepper.detail}), 진행도 {r["s"]:.3f}')
-                    break
-                if expert.done:
-                    print('\n에피소드 완료')
-                    break
-                if now - t_print > 0.2:
-                    err = np.linalg.norm(T_meas[:3, 3] - r['T_target'][:3, 3]) * 1e3
-                    print(f'\r{r["phase"]:<8} s {r["s"]:.3f} | 좌우 {r["e"][1] * 1e3:+5.2f} 높이 {r["e"][2] * 1e3:+5.2f} mm'
-                          f' | 틈새 {r["gap"] * 1e3:4.2f} mm | 추종 오차 {err:5.1f} mm | {stepper.status:<10}',
-                          end='', flush=True)
-                    t_print = now
-            t_next = max(t_next + dt, time.monotonic() - dt)
-            time.sleep(max(0.0, t_next - time.monotonic()))
+        rec, scn_out, result = run_episode(link, stepper, scn, args.scenario,
+                                           home_q=np.array([float(x) for x in args.home_q.split(',')]),
+                                           use_scenario_pose=args.use_scenario_pose, sensor_seed=args.sensor_seed,
+                                           reset_id=int(time.time()) % 100000)
     except KeyboardInterrupt:
         print('\n중단')
     finally:
-        sock.close()
-        if rec.rows:
-            rec.save(out_path, model.scn)
-            print(f'기록: {os.path.abspath(out_path)} ({len(rec.rows["t"])} 주기)')
+        link.close()
+        print(f'\n결과: {result}')
+        if len(rec):
+            rec.save(out_path, scn_out, result=result)
+            print(f'기록: {os.path.abspath(out_path)} ({len(rec)} 주기)')
 
 
 if __name__ == '__main__':

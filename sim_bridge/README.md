@@ -55,6 +55,8 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
 
 `--scenario`로 모재 오차 시나리오를 주면 receiver가 모재(바닥 판·웹 판·가접)를 만들고, 리더 대신 `expert_to_sim.py`가 실제 이음매를 따라 토치를 움직이며 정답을 기록한다. 실행 순서와 기록 형식은 [sim_errors/README.md](../sim_errors/README.md).
 
+학습용 묶음은 receiver를 `--scenario` 없이(대량이면 `--headless --lockstep`) 한 번 띄워 두고 `run_batch.py`로 연달아 만든다. 시나리오 교체와 로봇 바로 놓기는 패킷으로 한다. receiver 관절 게인 기본값은 검증한 `kp 1e5 / kd 2e3`이다. 이전 값이 필요하면 `--kp 1e4 --kd 1e3`.
+
 ## 확인 안 된 것
 
 - `opti3.urdf` 경로: indy-ros2-jazzy 안의 실제 위치로 바꿔 쓴다(xacro만 있으면 알려 줄 것).

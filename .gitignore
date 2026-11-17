@@ -8,3 +8,6 @@ log/
 scenarios/
 episodes/
 scenarios_single/
+batches/
+datasets/
+runs/

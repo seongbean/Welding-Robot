@@ -6,11 +6,14 @@ Isaac Sim에서 모재 오차를 용접 전·중·후로 나눠 분포로 주입
 | --- | --- |
 | `config/part_errors.yaml` | 오차 분포, 센서, 규칙 전문가 설정. 범위는 가정치이며 실측하면 이 파일만 고친다 |
 | `part_errors.py` | 시나리오 샘플링, 실제·추정 경로, 정답, 모재 메시 변형, 이음매 단면 센서(코드 이름 `laser`, 실기에서는 손목 depth 카메라 단면), 다음 패스 (numpy만 사용) |
-| `expert.py` | 규칙 전문가: 접근 → 하강 → 용접(위빙) → 후퇴 토치 목표와 정답 |
-| `make_scenarios.py` | 시나리오 JSON N개 생성과 정답 크기 분포 요약, 오차별 단독 검증 시나리오(`--single`) |
+| `expert.py` | 규칙 전문가: 접근 → 하강 → 용접(위빙) → 후퇴 토치 목표와 정답. 용접 구간만 모드, 직선 모드, 시작 어긋남, 실행 섭동 |
+| `make_scenarios.py` | 시나리오 JSON N개 생성과 정답 크기 분포 요약, 오차별 단독 검증 시나리오(`--single`), 학습용 묶음(`--batch`) |
+| `episode.py` | 기록(.npz) 저장 공통 부분, Isaac 없이 도는 운동학 에피소드(완벽 추종 가정) |
 | `check_episode.py` | 에피소드 기록(.npz) 점검 8항목과 그래프 |
-| `../sim_bridge/expert_to_sim.py` | 규칙 전문가 → opti3 IK → Isaac Sim, 에피소드 기록(.npz) |
-| `../sim_bridge/isaac_opti3_receiver.py --scenario` | Isaac Sim에 모재를 만들고 아크 진행도에 맞춰 변형을 그림 |
+| `../sim_bridge/expert_to_sim.py` | 규칙 전문가 → opti3 IK → Isaac Sim, 에피소드 하나 기록(.npz) |
+| `../sim_bridge/run_batch.py` | 묶음 일괄 실행, 에피소드별 자동 점검, 묶음 통계(`batch_report.json`) |
+| `../sim_bridge/isaac_opti3_receiver.py` | Isaac Sim에 모재를 만들고 아크 진행도에 맞춰 변형을 그림. 패킷으로 시나리오 교체·바로 놓기 |
+| `../learning/` | 묶음 → LeRobotDataset 변환, MLP/GRU 행동 복제, 보정 0 대비 평가 ([learning/README.md](../learning/README.md)) |
 
 ## 실행 순서
 
@@ -32,6 +35,32 @@ Isaac Sim에서 모재 오차를 용접 전·중·후로 나눠 분포로 주입
 
 Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경로다. 두 선의 차이가 정답이고, 토치는 빨간 선을 따라간다.
 
+## 학습용 묶음 일괄 생성
+
+에피소드 생성 사양의 묶음(깨끗함 30, 단독 65, 혼합 205, 가혹 30)을 만든다. 모든 에피소드는 용접 구간만 담고,
+로봇을 이음매 시작점 + 시작 어긋남(좌우·높이 ±2 mm, 작업각·진행각 ±2°) 자세에 바로 놓고 시작한다.
+직선/위빙 모드는 에피소드 시작 때 정해 끝까지 고정하고 묶음마다 반반이다(직선 = 위빙 0, 속도 규칙만).
+혼합 묶음의 절반에는 실행 섭동(좌우·높이 σ 0.5 mm, 각도 σ 1°, 0.5–2초 반 코사인)을 넣고 정답은 섭동 없는 값으로 둔다.
+개수·비율·어긋남·섭동은 `config/part_errors.yaml`의 `episode` 섹션.
+
+1. 시나리오: `python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches/t_small` (1/5 수량 66개. 전체는 `--scale` 빼기)
+2. Isaac Sim (터미널 1, 한 번만 띄움. `--scenario` 없이):
+   ```bat
+   C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --usd C:\...\posco_torch.usd --lockstep
+   ```
+3. 일괄 실행 (터미널 2):
+   ```bat
+   python sim_bridge\run_batch.py batches\t_small --out episodes\t_small --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
+   ```
+   중단해도 같은 명령으로 이어서 만든다(있는 .npz는 건너뜀). 끝나면 강도별 통계와 `episodes\t_small\batch_report.json`.
+   점검에 실패한 에피소드는 보고서에 이유가 남고 학습 변환에서 빠진다. 끝나지 않은 실행은 `*.failed.npz`.
+4. Isaac 없이 흐름만 시험: `python sim_bridge/run_batch.py batches/t_small --out episodes/t_small_kin --kinematic --jobs 4`
+
+receiver 쪽 동작: 패킷의 `scene.scenario`가 바뀌면 모재를 다시 만들고, `reset_q`가 오면 로봇을 그 관절 자세로 순간 이동시킨다.
+답장의 시뮬 시각(`t`)으로 전문가를 한 주기씩 진행하므로, Isaac이 멈추면 전문가도 멈춘다(single_place에서 0.34초 끊김으로 생긴
+4.8 mm 오차 원인). `--lockstep`이면 receiver가 전문가의 응답을 받은 뒤 다음 물리 스텝을 밟아, `--headless`와 같이 쓸 때
+실시간보다 빠르다. 물리 주기는 `--physics-hz`(기본 60, 이전과 같음)이고 전문가 주기도 같아진다.
+
 ## 오차별 단독 검증
 
 여러 오차가 섞인 에피소드로는 하나가 틀려도 묻히므로, 오차를 하나만 크게 과장해서 켠 시나리오로 따로 확인한다.
@@ -46,13 +75,13 @@ Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경�
 
 | 항목 | 통과 조건 | 실패하면 |
 | --- | --- | --- |
-| 단계 순서 | approach → descend → weld → retract → 완료 | 중단됐거나 IK 실패로 멈춤 |
+| 단계 순서 | approach → descend → weld → retract → 완료 (용접 구간만 담은 에피소드는 weld → 완료) | 중단됐거나 IK 실패로 멈춤 |
 | IK 상태 | 모든 주기 `ok` (95% 넘으면 주의) | `approx`·`ik_failed`가 많으면 모재가 도달 범위 경계에 있음 |
 | 진행도 | s가 줄지 않고 1까지 | 에피소드가 끝나지 않음 |
 | 정답 재계산 | 기록된 정답 = 시나리오로 다시 계산한 값 | 시나리오 파일과 기록이 어긋남 (코드 버전 차이) |
-| 목표 기하 | 토치 목표 = 실제 이음매 + standoff(+가접) + 위빙, 토치 방향 = 이음매 쪽 + 미는 각 | 규칙 전문가 버그 |
+| 목표 기하 | 전문가 목표 = 실제 이음매 + standoff(+가접) + 위빙, 토치 방향 = 이음매 쪽 + 미는 각, 보낸 목표 = 전문가 목표 + 기록된 어긋남 | 규칙 전문가 버그 |
 | 추종 오차 | 용접 중 토치 팁(실측 관절의 URDF FK)과 목표 차이 95%가 2 mm 미만 (6 mm 미만은 주의) | Isaac 관절이 명령을 못 따라감: 게인, 속도 제한 확인 |
-| 단면 센서 (`laser`) | 측정 실패율이 설정과 비슷, 정답 대비 편차가 노이즈 수준 | 센서 모델 문제 |
+| 단면 센서 (`laser`) | 측정 실패율이 설정과 비슷, 좌우·높이·틈새 폭의 정답 대비 편차가 노이즈 수준 | 센서 모델 문제 |
 | 용접 시간 | 길이 / 속도 범위 안 | 진행 속도 규칙 문제 |
 
 추종 오차는 URDF FK로 계산하므로, Isaac 장면의 토치 팁이 URDF와 다르면 여기서는 드러나지 않는다. 그건 Isaac 화면에서 토치 끝이 빨간 선 위를 지나가는지로 확인한다.
@@ -78,21 +107,25 @@ Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경�
 | `rotvec` | (N,3) | 정답 각도 보정 (x 작업각, y 진행각) |
 | `gap`, `tack` | (N,) | 토치 위치의 틈새, 가접 높이 |
 | `weave_amp`, `weave_hz`, `speed` | (N,) | 규칙 전문가의 위빙 진폭·주파수, 진행 속도 |
-| `laser` | (N,2) | 이음매 단면 측정 (토치 앞 30 mm의 좌우·높이 편차, 실기에서는 손목 depth 카메라 단면). 측정 실패는 NaN |
+| `laser`, `laser_valid` | (N,3), (N,) | 이음매 단면 측정 (토치 앞 30 mm의 좌우·높이 편차와 틈새 폭, 실기에서는 손목 depth 카메라 단면). 측정 실패는 NaN이고 `laser_valid`가 False. 이전 기록은 (N,2) |
 | `p_true`, `p_est` | (N,3) | 토치 진행도의 실제·추정 이음매 점 (link0 기준) |
-| `T_target`, `T_meas` | (N,4,4) | 토치 팁 목표 포즈, 실측 관절로 구한 포즈 |
+| `T_target`, `T_expert`, `T_meas` | (N,4,4) | 보낸 토치 팁 목표(어긋남 포함), 섭동 없는 전문가 목표, 실측 관절로 구한 포즈 |
+| `perturb` | (N,4) | 보낸 목표에 더한 어긋남 (이음매 좌표계 좌우·높이 m, 작업각·진행각 rad) = 시작 어긋남(지수 감소) + 실행 섭동 |
+| `t_sim` | (N,) | receiver 시뮬 시각 (Isaac 실행만) |
 | `q_cmd`, `q_meas`, `status` | (N,6), (N,6), (N,) | 관절 명령(안 보냈으면 NaN), 실측, FollowerStepper 상태 |
-| `scenario_json` | () | 사용한 시나리오 (자동 배치된 모재 위치 포함) |
+| `scenario_json` | () | 사용한 시나리오 (자동 배치된 모재 위치, `episode` 설정 포함) |
+| `meta_json` | () | 시편군, 직선/위빙 모드, 강도, 나눔, git 커밋, 실행 결과 |
 
 ## 아직 없는 것
 
 에피소드 생성 사양(Claude Doc "에피소드 생성 사양")과 지금 코드의 차이다. 구현 순서는 그 문서에 있다.
 
-- 용접 구간만 담는 에피소드: 지금은 접근부터 후퇴까지 기록하고, 모재를 시작 자세의 토치 팁 근처에 자동 배치한다. 사양은 고정 배치에 로봇을 이음매 시작점 근처(±2 mm, ±2°)에 바로 놓는다.
-- 재시작 없는 리시버와 잠금 단계(lock-step) 실행: 지금은 시나리오마다 리시버를 다시 띄우고, `joint_state_timeout` 동안에도 전문가가 진행한다. 리시버 기본 게인도 아직 `--kp 1e4 --kd 1e3`이다(검증한 값은 `--kp 1e5 --kd 2e3`).
-- 직선 모드 에피소드: 지금 전문가는 위빙 진폭이 최소 1 mm라 항상 위빙한다.
-- 단면 출력의 틈새 폭과 진행 거리 기준 버퍼: 지금 `laser`는 좌우·높이 두 값만 낸다.
+- 고정 배치: 지금은 홈 자세(`--home-q`)의 토치 팁 근처 고정 자리다. 도달 범위 지도로 여유가 가장 큰 자리를 고르는 일은 아직.
+- 작업대·지그 메시와 충돌 검사: 모재는 표시 전용이다.
+- 규칙 상태기계 검사용 전체 주기(대기~후퇴) 에피소드를 묶음에 섞기: `--batch`는 용접 구간만 만든다. 전체 주기는 `episode` 없는 시나리오(`--n`)로 만든다.
 - 시편군 확장: 지금은 T 필릿 하나다. ㄱ자 코너 필릿, 맞대기 V홈, 파이프 원주를 더한다.
+- 단독 묶음의 오차 서명 자동 비교 (지금은 `--single` 검증에서 눈으로 본다)
 - 렌더링한 depth 점군으로 실제 ICP 돌리기 (지금은 ICP 잔차를 분포에서 뽑음)
 - 다층 용접의 비드 형상
-- LeRobotDataset 형식 기록과 카메라 이미지 기록 (카메라 이미지는 기록 전용, 정책 입력 아님)
+- 카메라 이미지 기록 (기록 전용, 정책 입력 아님)
+- DAgger: 정책을 Isaac에서 몰고 전문가가 정답을 다는 실행기 (learning/README.md "다음 단계")

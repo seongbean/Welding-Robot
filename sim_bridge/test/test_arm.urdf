@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- 시험용 6축 팔 (UR5 비슷한 치수). opti3.urdf 대신 run_batch 통신 시험에만 쓴다. -->
+<robot name="test_arm">
+  <link name="link0"/><link name="link1"/><link name="link2"/><link name="link3"/>
+  <link name="link4"/><link name="link5"/><link name="link6"/><link name="tcp"/>
+  <joint name="joint0" type="revolute"><parent link="link0"/><child link="link1"/>
+    <origin xyz="0 0 0.089159"/><axis xyz="0 0 1"/><limit lower="-6.28" upper="6.28" effort="1" velocity="1"/></joint>
+  <joint name="joint1" type="revolute"><parent link="link1"/><child link="link2"/>
+    <origin xyz="0 0.13585 0" rpy="0 1.5708 0"/><axis xyz="0 1 0"/><limit lower="-6.28" upper="6.28" effort="1" velocity="1"/></joint>
+  <joint name="joint2" type="revolute"><parent link="link2"/><child link="link3"/>
+    <origin xyz="0 -0.1197 0.425"/><axis xyz="0 1 0"/><limit lower="-3.14" upper="3.14" effort="1" velocity="1"/></joint>
+  <joint name="joint3" type="revolute"><parent link="link3"/><child link="link4"/>
+    <origin xyz="0 0 0.39225" rpy="0 1.5708 0"/><axis xyz="0 1 0"/><limit lower="-6.28" upper="6.28" effort="1" velocity="1"/></joint>
+  <joint name="joint4" type="revolute"><parent link="link4"/><child link="link5"/>
+    <origin xyz="0 0.093 0"/><axis xyz="0 0 1"/><limit lower="-6.28" upper="6.28" effort="1" velocity="1"/></joint>
+  <joint name="joint5" type="revolute"><parent link="link5"/><child link="link6"/>
+    <origin xyz="0 0 0.09465"/><axis xyz="0 1 0"/><limit lower="-6.28" upper="6.28" effort="1" velocity="1"/></joint>
+  <joint name="tcp_joint" type="fixed"><parent link="link6"/><child link="tcp"/>
+    <origin xyz="0 0.0823 0" rpy="-1.5708 0 0"/></joint>
+</robot>

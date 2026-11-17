@@ -323,17 +323,21 @@ class PartErrorModel:
                 'p_true': p_t[0], 'R_true': R_t[0], 'p_est': p_e[0], 'R_est': R_e[0]}
 
     def laser(self, s_torch: float, s_arc: float, rng: np.random.Generator):
-        """레이저 라인 센서: 토치 앞 lookahead 지점의 이음매 좌우·높이 편차 [m] (추정 경로 기준).
+        """이음매 단면 센서 (손목 depth 카메라 단면): 토치 앞 lookahead 지점의 [좌우, 높이, 틈새 폭] [m].
 
-        측정 실패(스패터·연기, 이음매 끝을 넘음)는 NaN.
+        좌우·높이는 추정 경로 좌표계 기준 편차다. 실기에서는 카메라가 토치에 붙어 있으므로 토치 기준으로 잰 값에
+        측정 순간의 토치 자세(로봇이 FK로 안다)를 더해 같은 값을 만든다. 가접 위에서는 높이에 가접이 들어간다.
+        측정 실패(금속 반사로 생긴 구멍, 이음매 끝을 넘음)는 NaN 세 개.
         """
         se = self.scn['sensors']
         s_look = s_torch + se['laser_lookahead'] / self.L
         if s_look > 1.0 or rng.uniform() < se['laser_dropout']:
-            return np.array([np.nan, np.nan])
+            return np.full(3, np.nan)
         lab = self.label(s_look, s_arc)
-        meas = np.array([lab['e'][1], lab['e'][2] + lab['tack']])
-        return meas + rng.normal(scale=se['laser_noise'], size=2)
+        meas = np.array([lab['e'][1], lab['e'][2] + lab['tack'], lab['gap']])
+        meas = meas + rng.normal(scale=se['laser_noise'], size=3)
+        meas[2] = max(0.0, meas[2])
+        return meas
 
     # --- 모재 메시 변형 (Isaac Sim 표시용)
     def deform_points(self, P, plate, s_arc) -> np.ndarray:
@@ -456,3 +460,80 @@ def summarize(scn: dict, n: int = 101) -> dict:
             'lateral_change_mm': float(np.ptp(e[:, 1])), 'height_change_mm': float(np.ptp(e[:, 2])),
             'work_angle_max_deg': float(np.max(np.abs(r[:, 0]))), 'travel_angle_max_deg': float(np.max(np.abs(r[:, 1]))),
             'gap_min_mm': float(np.min(g)), 'gap_max_mm': float(np.max(g))}
+
+
+# ----------------------------------------------------------------------------- 학습용 묶음
+# 에피소드 생성 사양 "배치와 오차": 깨끗함 / 단독 / 혼합 / 가혹(평가 전용) 네 강도
+KINDS = ('clean', 'single', 'mixed', 'hard')
+
+# 단독 묶음에서 오차마다 샘플 시나리오에서 남길 항목 (나머지는 0)
+_SINGLE_KEEP = {
+    'place': [('place',)], 'icp': [('icp',)],
+    'web_straightness': [('shape', 'web_bow'), ('shape', 'web_wave'), ('shape', 'web_wave_cycles'),
+                         ('shape', 'web_wave_phase')],
+    'base_flatness': [('shape', 'base_bow'), ('shape', 'base_wave'), ('shape', 'base_wave_cycles'),
+                      ('shape', 'base_wave_phase')],
+    'gap': [('shape', 'gap0'), ('shape', 'gap1')],
+    'tack': [('shape', 'tacks')],
+    'drift': [('slip', 'drift'), ('slip', 'drift_s0'), ('slip', 'drift_span')],
+    'jump': [('slip', 'jump'), ('slip', 'jump_s')],
+    'base_angle': [('heat', 'base_angle'), ('heat', 'length')],
+    'web_tilt': [('heat', 'web_tilt'), ('heat', 'length')],
+    'bow': [('heat', 'bow')],
+    'gap_close': [('shape', 'gap0'), ('shape', 'gap1'), ('heat', 'gap_close')],
+}
+
+# 가혹 묶음에서 크기를 키울 범위 (개수·확률·주기·구간 길이는 그대로)
+_SCALE_KEYS = {
+    'pre_weld': ('place_xyz_mm', 'place_rpy_deg', 'icp_xyz_mm', 'icp_rot_deg', 'web_bow_mm_per_m', 'web_wave_mm',
+                 'base_bow_mm_per_m', 'base_wave_mm', 'gap_mm', 'gap_taper_mm', 'tack_height_mm'),
+    'in_weld': ('drift_mm', 'jump_mm', 'base_angle_deg', 'web_tilt_deg', 'bow_mm', 'gap_close_mm'),
+}
+
+
+def scale_cfg(cfg: dict, k: float) -> dict:
+    """오차 크기 범위를 k배 한 config 사본 (가혹 묶음: 범위 상한의 1.5배)."""
+    c = copy.deepcopy(cfg)
+    for sec, keys in _SCALE_KEYS.items():
+        for key in keys:
+            v = c[sec][key]
+            c[sec][key] = [x * k for x in v] if isinstance(v, (list, tuple)) else v * k
+    return c
+
+
+def single_in_range(cfg: dict, name: str, rng: np.random.Generator, seed=None) -> dict:
+    """오차 하나만 범위 안에서 뽑은 시나리오 (단독 묶음). 센서 노이즈·실패는 설정값 그대로."""
+    c = copy.deepcopy(cfg)
+    c['in_weld']['drift_prob'] = c['in_weld']['jump_prob'] = 1.0   # 밀림·튐 단독은 반드시 생기게
+    src = sample_scenario(c, rng, seed=seed)
+    z = zero_errors(src)
+    z['sensors'] = copy.deepcopy(src['sensors'])
+    if name == 'residual':
+        z['prior'] = {'base_angle': src['heat']['base_angle'], 'web_tilt': src['heat']['web_tilt'],
+                      'bow': src['heat']['bow']}
+        z['pass_index'] = 1
+    elif name in _SINGLE_KEEP:
+        for path in _SINGLE_KEEP[name]:
+            if len(path) == 1:
+                z[path[0]] = copy.deepcopy(src[path[0]])
+            else:
+                z[path[0]][path[1]] = copy.deepcopy(src[path[0]][path[1]])
+    else:
+        raise ValueError(f'알 수 없는 오차: {name}')
+    z['single_error'] = name
+    return z
+
+
+def episode_meta(kind: str, mode: str, rng: np.random.Generator, ep: dict, perturb: bool, split: str) -> dict:
+    """시나리오에 붙일 에피소드 설정: 강도, 직선/위빙 모드, 시작 어긋남, 실행 섭동, 나눠 쓰기."""
+    so = ep['start_offset']
+    return {'kind': kind, 'mode': mode, 'split': split, 'weld_only': True,
+            # 시작 토치 어긋남 (이음매 좌표계: 좌우 y, 높이 z [m], 작업각 x, 진행각 y [rad])
+            'start_offset': [_uni(rng, so['lateral_mm']) * MM, _uni(rng, so['height_mm']) * MM,
+                             _uni(rng, so['work_deg']) * DEG, _uni(rng, so['travel_deg']) * DEG],
+            'start_settle': float(ep.get('start_settle_s', 0.3)),
+            'perturb': bool(perturb), 'perturb_seed': int(rng.integers(2 ** 31)),
+            'perturb_cfg': {'lateral': ep['perturb']['lateral_mm'] * MM, 'height': ep['perturb']['height_mm'] * MM,
+                            'angle': ep['perturb']['angle_deg'] * DEG,
+                            'duration': list(ep['perturb']['duration_s']),
+                            'interval': list(ep['perturb']['interval_s'])}}
