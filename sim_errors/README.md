@@ -7,7 +7,7 @@ Isaac Sim에서 모재 오차를 용접 전·중·후로 나눠 분포로 주입
 | `config/part_errors.yaml` | 오차 분포, 센서, 규칙 전문가 설정. 범위는 가정치이며 실측하면 이 파일만 고친다 |
 | `part_errors.py` | 시나리오 샘플링, 실제·추정 경로, 정답, 모재 메시 변형, 레이저 라인 센서, 다음 패스 (numpy만 사용) |
 | `expert.py` | 규칙 전문가: 접근 → 하강 → 용접(위빙) → 후퇴 토치 목표와 정답 |
-| `make_scenarios.py` | 시나리오 JSON N개 생성과 정답 크기 분포 요약 |
+| `make_scenarios.py` | 시나리오 JSON N개 생성과 정답 크기 분포 요약, 오차별 단독 검증 시나리오(`--single`) |
 | `check_episode.py` | 에피소드 기록(.npz) 점검 8항목과 그래프 |
 | `../sim_bridge/expert_to_sim.py` | 규칙 전문가 → opti3 IK → Isaac Sim, 에피소드 기록(.npz) |
 | `../sim_bridge/isaac_opti3_receiver.py --scenario` | Isaac Sim에 모재를 만들고 아크 진행도에 맞춰 변형을 그림 |
@@ -31,6 +31,16 @@ Isaac Sim에서 모재 오차를 용접 전·중·후로 나눠 분포로 주입
 5. 기록 점검: `python -m sim_errors.check_episode episodes\part0000_pass0.npz` (그래프는 `conda install matplotlib` 후 같은 폴더에 .png)
 
 Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경로다. 두 선의 차이가 정답이고, 토치는 빨간 선을 따라간다.
+
+## 오차별 단독 검증
+
+여러 오차가 섞인 에피소드로는 하나가 틀려도 묻히므로, 오차를 하나만 크게 과장해서 켠 시나리오로 따로 확인한다.
+
+1. `python -m sim_errors.make_scenarios --single all --out scenarios_single` → 13개 `single_<오차>.json`과 기대 정답 표(진행도 0, 0.25, 0.5, 0.75, 1에서 좌우·높이·작업각·진행각·틈새·가접)를 출력
+2. 오차마다 receiver(`--scenario scenarios_single\single_<오차>.json --kp 1e5 --kd 2e3`)와 `expert_to_sim.py`를 실행
+3. `check_episode`로 8항목을 확인하고, 그래프가 1의 기대 정답 표와 같은 모양인지, Isaac 화면이 계획 문서 "오차별 단독 검증" 표의 화면 기대와 같은지 본다
+
+단독 시나리오는 레이저 노이즈와 실패도 0이라 레이저 점이 정답 선 위에 정확히 겹친다(토치 앞 30 mm에서 잰 값이라 그만큼 앞에 찍힘).
 
 ## 기록 점검 (check_episode.py)
 
