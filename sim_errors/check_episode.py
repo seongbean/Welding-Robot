@@ -127,7 +127,7 @@ def check(rows: dict, scn: dict, track_tol_mm: float = 2.0) -> list[tuple[str, s
     out.append(('추종 오차 (용접 중)', level,
                 f'위치 중앙 {np.median(pos[idx]):.2f} / 95% {p95:.2f} / 최대 {pmax:.2f} mm, 각도 95% {a95:.2f} deg'))
 
-    # 7. 단면 센서 (코드 이름 laser): [좌우, 높이(+가접), 틈새 폭]. 이전 기록은 두 열
+    # 7. 단면 센서 (코드 이름 laser): [좌우, 높이(+가접), 틈새 폭, 작업각, 진행각]. 이전 기록은 두 열 또는 세 열
     las = rows['laser'][idx]
     valid = np.isfinite(las[:, 0])
     look = scn['sensors']['laser_lookahead'] / m.L
@@ -135,22 +135,30 @@ def check(rows: dict, scn: dict, track_tol_mm: float = 2.0) -> list[tuple[str, s
     drop = 1.0 - float(np.mean(valid[in_range])) if in_range.any() else float('nan')
     exp_drop = scn['sensors']['laser_dropout']
     noise = scn['sensors']['laser_noise']
-    res, res_gap = [], []
+    res, res_gap, res_ang = [], [], []
     for k in np.flatnonzero(valid):
         i = idx[k]
         lab = m.label(float(s[i]) + look, float(rows['s_arc'][i]))
         res.append(las[k, :2] - np.array([lab['e'][1], lab['e'][2] + lab['tack']]))
         if las.shape[1] > 2 and lab['gap'] > 3 * noise:   # 틈새 0 근처는 0에서 잘려 편향되므로 제외
             res_gap.append(las[k, 2] - lab['gap'])
+        if las.shape[1] >= 5:
+            res_ang.append(las[k, 3:5] - lab['rotvec'][:2])
     if res:
         sd = np.std(np.array(res), axis=0)
         sd_gap = float(np.std(res_gap)) if res_gap else 0.0
         good = abs(drop - exp_drop) < max(0.05, 3 * math.sqrt(exp_drop * (1 - exp_drop) / max(1, in_range.sum())))
         good = good and np.all(sd < 2 * noise + 1e-6) and sd_gap < 2 * noise + 1e-6
         gap_txt = f' 틈새 {sd_gap / MM:.3f}' if las.shape[1] > 2 else ''
+        ang_txt = ''
+        if res_ang:   # 평면 맞춤 각도: 표준편차 1° 미만, 평균 치우침 0.3° 미만
+            ra = np.array(res_ang) / DEG
+            sd_a, bias_a = ra.std(axis=0), np.abs(ra.mean(axis=0))
+            good = good and np.all(sd_a < 1.0) and np.all(bias_a < 0.3)
+            ang_txt = f', 작업각 {sd_a[0]:.2f} 진행각 {sd_a[1]:.2f} deg (치우침 {bias_a[0]:.2f} {bias_a[1]:.2f})'
         out.append(('단면 센서', OK if good else WARN,
                     f'실패율 {drop * 100:.1f}% (설정 {exp_drop * 100:.0f}%), 정답 대비 표준편차 '
-                    f'좌우 {sd[0] / MM:.3f} 높이 {sd[1] / MM:.3f}{gap_txt} mm (설정 {noise / MM:.3f})'))
+                    f'좌우 {sd[0] / MM:.3f} 높이 {sd[1] / MM:.3f}{gap_txt} mm (설정 {noise / MM:.3f}){ang_txt}'))
     else:
         out.append(('단면 센서', WARN, '유효 측정 없음'))
 
@@ -200,6 +208,9 @@ def plot(rows: dict, scn: dict, path: str) -> str | None:
     ax[0].set_ylabel('mm')
     ax[1].plot(s, r[:, 0], label='작업각 보정')
     ax[1].plot(s, r[:, 1], label='진행각 보정')
+    if las.shape[1] >= 5:
+        ax[1].plot(s + look, las[:, 3] * MM / DEG, '.', ms=2, alpha=0.4, label='단면 작업각 (측정 위치)')
+        ax[1].plot(s + look, las[:, 4] * MM / DEG, '.', ms=2, alpha=0.4, label='단면 진행각 (측정 위치)')
     ax[1].set_ylabel('deg')
     ax[2].plot(s, rows['gap'][weld] / MM, label='틈새 [mm]')
     if las.shape[1] > 2:

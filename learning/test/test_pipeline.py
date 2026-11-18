@@ -18,13 +18,14 @@ from sim_errors.part_errors import DEG, MM, PartErrorModel
 def test_section_buffer_distance_indexing():
     buf = SectionBuffer(0.3)                      # 300 mm 이음매
     for x_mm in np.arange(0, 60, 0.5):            # 0~60 mm에서 잰 값: 좌우 = 위치(mm) × 0.001 m
-        buf.add(x_mm / 300, [x_mm * MM * 0.01, 0.0, 0.001])
+        buf.add(x_mm / 300, [x_mm * MM * 0.01, 0.0, 0.001, 0.01, -0.01])
     vals, valid = buf.query(40 / 300)             # 토치 40 mm: 질의점 30, 35, ..., 70 mm
     exp = (40 + BUF_OFFSETS_MM) * 0.01
     ok = 40 + BUF_OFFSETS_MM < 62              # 마지막 측정 59.5 mm에서 2.5 mm 안까지
     assert np.array_equal(valid.astype(bool), ok)
     assert np.allclose(vals[ok, 0], exp[ok], atol=0.006)
     assert np.allclose(vals[ok, 2], 1.0)
+    assert np.allclose(vals[ok, 3], np.degrees(0.01)) and np.allclose(vals[ok, 4], -np.degrees(0.01))
     buf.add(45 / 300, [np.nan] * 3)               # 측정 실패는 무시
     assert buf.query(40 / 300)[1].sum() == ok.sum()
 
@@ -61,7 +62,7 @@ def test_frames_shapes(small_batch):
     _, ep_dir = small_batch
     rows, scn, meta = load_episode(str(ep_dir / 'mixed_0001.npz'))
     obs, act, ts = episode_frames(rows, scn)
-    assert obs.shape[1] == len(OBS_NAMES) == 43 and act.shape[1] == len(ACTION_NAMES) == 7
+    assert obs.shape[1] == len(OBS_NAMES) == 61 and act.shape[1] == len(ACTION_NAMES) == 7
     assert len(obs) == pytest.approx(rows['t'][-1] * 10, abs=2)
     assert np.allclose(np.diff(ts), 0.1, atol=0.011)
     assert meta['mode'] == scn['episode']['mode']
@@ -69,6 +70,8 @@ def test_frames_shapes(small_batch):
     assert np.allclose(act[:, 4], rows['speed'][0] / MM, rtol=0.5)
     # 단면 버퍼 유효 표시는 0/1, 토치 앞 30 mm 점은 대부분 유효
     valid = obs[:, obs_index(['section'])][:, 27:]
+    prof = obs[:, obs_index(['profile'])]
+    assert prof.shape[1] == 18 and np.abs(prof).max() > 0      # 평면 맞춤 각도가 들어 있음
     assert set(np.unique(valid)) <= {0.0, 1.0} and valid[:, -1].mean() > 0.4   # 60 mm 이음매라 끝 30 mm는 앞이 없음
 
 
@@ -85,7 +88,7 @@ def test_convert_train_evaluate(small_batch):
         res = train(data, out, model=model, epochs=3, seq=8, verbose=False)
         assert np.isfinite(res['best_val'])
         pol = Policy(os.path.join(out, 'policy.pt'))
-        a = pol(np.zeros(43, dtype=np.float32))
+        a = pol(np.zeros(61, dtype=np.float32))
         assert a.shape == (7,) and np.all(np.isfinite(a))
         ev = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False)
         assert ev['closed_loop']['all']['done'] == 1.0
@@ -93,7 +96,8 @@ def test_convert_train_evaluate(small_batch):
     # 입력 묶음을 줄여도 학습·실행
     out = str(root / 'notorch')
     train(data, out, model='mlp', groups=('section', 'progress', 'mode'), epochs=2, verbose=False)
-    assert Policy(os.path.join(out, 'policy.pt'))(np.zeros(43, dtype=np.float32)).shape == (7,)
+    assert len(Policy(os.path.join(out, 'policy.pt')).idx) == 39
+    assert Policy(os.path.join(out, 'policy.pt'))(np.zeros(61, dtype=np.float32)).shape == (7,)
 
 
 def test_failed_episodes_are_skipped(small_batch, tmp_path):

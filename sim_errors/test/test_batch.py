@@ -90,7 +90,7 @@ def test_weld_only_episodes_pass_checks(batch_eps):
         res = check(rows, scn)
         assert all(lv == OK for _, lv, _ in res), (name, res)
         assert rows['phase'][0] == 'weld' and rows['done'][-1]
-        assert rows['laser'].shape[1] == 3
+        assert rows['laser'].shape[1] == 5
 
 
 def test_straight_mode_has_no_weave(batch_eps):

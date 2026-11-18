@@ -5,6 +5,8 @@
   단면 센서는 토치 앞 30 mm만 재므로, 잰 값을 잰 이음매 위치와 함께 쌓아 두고 지금 토치 위치 기준으로 꺼낸다.
   값은 추정 경로 좌표계 편차 (카메라가 토치에 붙어 있어 토치 기준으로 잰 값 + 그때의 토치 자세).
   아직 못 잰 점과 측정 실패는 0 + 유효 0.
+- profile: 같은 버퍼 9점 × (작업각, 진행각). 단면 패치의 두 판 면 평면 맞춤으로 구한 이음매 좌표계 회전.
+  이전 기록(단면 세 열)에는 없어서 0이다. sim_errors.resense로 다시 계산할 수 있다.
 - torch: 추정 경로 기준 토치 자세 어긋남 (좌우, 높이, 작업각, 진행각). 위빙·섭동·시작 어긋남이 다 들어간다.
 - progress: 진행도 s
 - mode: 직선/위빙 원핫 (위빙, 직선)
@@ -24,11 +26,14 @@ from sim_errors.part_errors import DEG, MM, PartErrorModel, rotvec_to_R
 BUF_OFFSETS_MM = np.arange(-10.0, 30.1, 5.0)          # 9점
 BUF_BIN_MM = 1.0                                      # 버퍼 칸 크기
 BUF_MATCH_MM = 2.5                                    # 질의점에서 이만큼 안의 가장 가까운 칸
+BUF_CH = 5                                            # 좌우, 높이, 틈새 [mm], 작업각, 진행각 [deg]
 
 SECTION_NAMES = ([f'sec_{c}_{int(o):+d}' for o in BUF_OFFSETS_MM for c in ('lat', 'h', 'gap')]
                  + [f'sec_valid_{int(o):+d}' for o in BUF_OFFSETS_MM])
+PROFILE_NAMES = [f'sec_{c}_{int(o):+d}' for o in BUF_OFFSETS_MM for c in ('work', 'travel')]
 GROUPS = {
     'section': SECTION_NAMES,
+    'profile': PROFILE_NAMES,
     'torch': ['torch_lat', 'torch_h', 'torch_work', 'torch_travel'],
     'progress': ['s'],
     'mode': ['mode_weave', 'mode_straight'],
@@ -52,16 +57,19 @@ class SectionBuffer:
         self.bins: dict[int, np.ndarray] = {}
 
     def add(self, s_meas: float, meas) -> None:
+        """meas: [좌우, 높이, (틈새), (작업각, 진행각)] m·rad. 없는 열은 0."""
         meas = np.asarray(meas, dtype=float)
         if not np.all(np.isfinite(meas[:2])):
             return
-        if meas.shape[0] < 3 or not np.isfinite(meas[2]):
-            meas = np.array([meas[0], meas[1], 0.0])
-        self.bins[int(round(s_meas * self.L_mm / BUF_BIN_MM))] = meas[:3] / MM
+        v = np.zeros(BUF_CH)
+        v[:len(meas)] = np.where(np.isfinite(meas), meas, 0.0)[:BUF_CH]
+        v[:3] /= MM
+        v[3:] /= DEG
+        self.bins[int(round(s_meas * self.L_mm / BUF_BIN_MM))] = v
 
     def query(self, s_torch: float) -> tuple[np.ndarray, np.ndarray]:
-        """(9,3) 값 [mm], (9,) 유효."""
-        vals = np.zeros((len(BUF_OFFSETS_MM), 3))
+        """(9,5) 값 [mm, deg], (9,) 유효."""
+        vals = np.zeros((len(BUF_OFFSETS_MM), BUF_CH))
         valid = np.zeros(len(BUF_OFFSETS_MM))
         reach = int(BUF_MATCH_MM // BUF_BIN_MM)
         for k, off in enumerate(BUF_OFFSETS_MM):
@@ -97,7 +105,9 @@ def torch_offset(model: PartErrorModel, s: float, T: np.ndarray) -> np.ndarray:
 
 
 def make_obs(vals, valid, torch, s: float, mode: str) -> np.ndarray:
-    return np.concatenate([np.asarray(vals).ravel(), valid, torch, [s],
+    """OBS_NAMES 순서: section(좌우·높이·틈새 27 + 유효 9), profile(작업각·진행각 18), torch 4, s, 모드 2."""
+    vals = np.asarray(vals)
+    return np.concatenate([vals[:, :3].ravel(), valid, vals[:, 3:5].ravel(), torch, [s],
                            [1.0, 0.0] if mode == 'weave' else [0.0, 1.0]]).astype(np.float32)
 
 
@@ -116,7 +126,7 @@ def load_episode(path: str) -> tuple[dict, dict, dict]:
 
 
 def episode_frames(rows: dict, scn: dict, fps: int = FPS) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """100 Hz 기록 → fps 프레임 (관측 (n,43), 행동 (n,7), 시각 (n,)). 용접 구간(아크 ON)만."""
+    """100 Hz 기록 → fps 프레임 (관측 (n,61), 행동 (n,7), 시각 (n,)). 용접 구간(아크 ON)만."""
     model = PartErrorModel(scn)
     look = scn['sensors']['laser_lookahead'] / model.L
     mode = scn.get('episode', {}).get('mode', 'weave')
