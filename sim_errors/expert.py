@@ -179,7 +179,7 @@ class ScriptedExpert:
                 'p_true': lab['p_true'], 'p_est': lab['p_est'],
                 'weave_amp': amp, 'weave_hz': self.weave_hz if phase == 'weld' else 0.0, 'speed': v,
                 'laser': (self.m.laser(self.s, self.s_arc, self.rng) if phase == 'weld'
-                          else np.full(3, np.nan))}
+                          else np.full(5, np.nan))}
 
     @property
     def weave_hz(self) -> float:

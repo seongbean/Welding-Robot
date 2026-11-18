@@ -5,13 +5,13 @@
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small --no-lerobot   # frames.npz만
 
-- 관측·행동 정의는 learning/features.py (관측 43개, 행동 7개).
+- 관측·행동 정의는 learning/features.py (관측 61개, 행동 7개).
 - 묶음 실행 보고서(<에피소드 폴더>/batch_report.json)가 있으면 점검에 실패한 에피소드는 뺀다.
 - 학습·검증·시험 나눔은 시나리오의 episode.split (에피소드 단위). 가혹 묶음은 시험(평가 전용).
 - frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode.
   학습(learning/train_bc.py)은 이 파일을 읽는다.
 - LeRobotDataset (pip install "lerobot[dataset]"이 있으면): <out>/lerobot, repo_id local/<폴더 이름>, fps 10,
-  observation.state(43), action(7), task = "T fillet weld (weave|straight)". 나눔은 <out>/splits.json.
+  observation.state(61), action(7), task = "T fillet weld (weave|straight)". 나눔은 <out>/splits.json.
   나중에 ACT·Diffusion 등 LeRobot 정책과 비교할 때 쓴다.
 """
 from __future__ import annotations

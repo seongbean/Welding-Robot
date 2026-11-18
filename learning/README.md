@@ -11,12 +11,13 @@
 
 ## 관측과 행동
 
-관측 43개 (단위 mm, deg)
+관측 61개 (단위 mm, deg). 기본 입력은 `section,profile,progress,mode` (토치 자세는 뺌).
 
 | 묶음 (`--obs`) | 개수 | 내용 |
 | --- | --- | --- |
 | `section` | 36 | 단면 거리 버퍼: 토치 뒤 10 mm ~ 앞 30 mm, 5 mm 간격 9점 × (좌우, 높이, 틈새 폭) + 9점 유효 표시. 단면은 토치 앞 30 mm에서만 재므로 잰 값을 이음매 위치와 함께 쌓아 꺼낸다. 값은 추정 경로 기준 편차(토치 기준 측정 + 그때 토치 자세) |
-| `torch` | 4 | 추정 경로 기준 토치 자세 어긋남 (좌우, 높이, 작업각, 진행각). 위빙·섭동·시작 어긋남 포함 |
+| `profile` | 18 | 같은 버퍼 9점 × (작업각, 진행각): 단면 패치의 두 판 면 평면 맞춤으로 구한 이음매 좌표계 회전 ([sim_errors/README.md](../sim_errors/README.md) "단면 센서 모델") |
+| `torch` | 4 | 추정 경로 기준 토치 자세 어긋남 (좌우, 높이, 작업각, 진행각). 위빙·섭동·시작 어긋남 포함. 직전 정답을 따라 하는 지름길이 생겨 기본 입력에서 뺌 |
 | `progress` | 1 | 진행도 s |
 | `mode` | 2 | 위빙/직선 원핫 |
 
@@ -30,10 +31,10 @@
 python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches\t_small
 python sim_bridge\run_batch.py batches\t_small --out episodes\t_small --follower-urdf C:\...\opti3.urdf
 python -m learning.to_lerobot episodes\t_small --out datasets\t_small
-python -m learning.train_bc datasets\t_small --model mlp --out runs\mlp_full
-python -m learning.train_bc datasets\t_small --model mlp --obs section,progress,mode --out runs\mlp_notorch
-python -m learning.train_bc datasets\t_small --model gru --out runs\gru_full
-python -m learning.evaluate runs\mlp_full\policy.pt runs\mlp_notorch\policy.pt runs\gru_full\policy.pt --data datasets\t_small --episodes episodes\t_small
+python -m learning.train_bc datasets\t_small --model mlp --out runs\mlp
+python -m learning.train_bc datasets\t_small --model mlp --obs section,progress,mode --out runs\mlp_noprofile
+python -m learning.train_bc datasets\t_small --model gru --out runs\gru
+python -m learning.evaluate runs\mlp\policy.pt runs\mlp_noprofile\policy.pt runs\gru\policy.pt --data datasets\t_small --episodes episodes\t_small
 ```
 
 Isaac 없이 전체 흐름만 볼 때는 두 번째 줄을 `--kinematic --jobs 4`(완벽 추종 가정)로 바꾼다.
@@ -63,8 +64,24 @@ Isaac 대신 운동학 에피소드 66개(1/5 수량: 깨끗함 6, 단독 13, �
 - GRU가 MLP보다 낫지 않다. 지금 크기에서는 MLP로 시작한다.
 - 수량: 학습 손실이 검증 손실보다 훨씬 낮아(과적합) 1/5 수량은 부족하다. 사양대로 군당 300개로 늘린 뒤 다시 비교한다.
 
+## 단면 프로파일 추가 후 (운동학 데이터, 2026-11-18)
+
+같은 66개 기록의 단면 열을 평면 맞춤 모델로 다시 계산하고(`sim_errors.resense`) 같은 나눔으로 비교했다. 닫힌 루프 RMS, 시험 12개 전체 (정책 / 보정 0, 개선율)
+
+| 정책 | 좌우 mm | 높이 mm | 작업각 deg | 진행각 deg |
+| --- | --- | --- | --- | --- |
+| MLP, 프로파일 없음 | 0.22 / 1.30 (83%) | 0.41 / 1.31 (69%) | 0.27 / 0.23 (−16%) | 0.66 / 0.68 (3%) |
+| **MLP, 프로파일 (기본)** | 0.23 / 1.30 (82%) | 0.42 / 1.31 (68%) | 0.07 / 0.23 (70%) | 0.25 / 0.68 (64%) |
+| GRU, 프로파일 | 0.29 / 1.30 (78%) | 0.47 / 1.31 (64%) | 0.06 / 0.23 (74%) | 0.29 / 0.68 (57%) |
+| MLP, 프로파일 + 토치 자세 | 0.24 / 1.30 (82%) | 0.56 / 1.31 (57%) | 0.07 / 0.23 (68%) | 0.23 / 0.68 (66%) |
+
+- 판 면 기울기를 넣자 각도를 배운다. 좌우·높이는 그대로다.
+- 토치 자세를 넣으면 이번에도 닫힌 루프 높이가 나빠진다(68% → 57%).
+- GRU는 여전히 MLP보다 낫지 않다.
+
 ## 다음 단계
 
 - Isaac 에피소드로 같은 비교 (추종 오차와 처짐이 들어간 실제 기록)
 - DAgger: 정책이 Isaac(또는 운동학)에서 몰고 전문가가 정답을 다는 실행기. 닫힌 루프 평가 코드(`evaluate.closed_loop`)를 기록하도록 넓히면 된다.
-- 각도 입력(단면 프로파일) 또는 각도 행동 제거 결정
+- Isaac 기록(episodes\t_small)을 resense로 다시 계산해 같은 비교
+- 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값 맞추기

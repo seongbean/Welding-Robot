@@ -2,13 +2,14 @@
 """기준 보정 정책 학습: 작은 MLP 또는 GRU 행동 복제 (정답 = 시뮬 규칙 전문가).
 
 사용법 (저장소 루트에서, pip install torch)
-  python -m learning.train_bc datasets/t_small --model mlp --out runs/mlp_full
-  python -m learning.train_bc datasets/t_small --model gru --out runs/gru_full
-  python -m learning.train_bc datasets/t_small --model mlp --obs section,progress,mode --out runs/mlp_no_torch
+  python -m learning.train_bc datasets/t_small --model mlp --out runs/mlp            # 기본 입력 section,profile,progress,mode
+  python -m learning.train_bc datasets/t_small --model mlp --obs section,progress,mode --out runs/mlp_noprofile
+  python -m learning.train_bc datasets/t_small --model gru --out runs/gru
 
-- 입력 묶음(--obs): section(단면 거리 버퍼 36), torch(토치 자세 어긋남 4), progress(s), mode(직선/위빙 2).
+- 입력 묶음(--obs): section(단면 거리 버퍼 좌우·높이·틈새 + 유효 36), profile(같은 버퍼의 작업각·진행각 18),
+  torch(토치 자세 어긋남 4), progress(s), mode(직선/위빙 2).
   torch는 전문가가 직전에 보낸 보정을 거의 그대로 담고 있어서, 정책이 센서 대신 자기 직전 출력을 따라 하는
-  지름길을 배울 수 있다. 그래서 torch를 뺀 구성과 닫힌 루프 평가로 비교한다.
+  지름길을 배운다(첫 한 바퀴에서 닫힌 루프 높이 오차가 나빠짐). 그래서 기본 입력에서 뺐다.
 - 손실: 행동 7개를 학습 세트 평균·표준편차로 정규화한 MSE.
 - MLP: 프레임 하나 → 행동. GRU: 길이 --seq (기본 20 = 2초) 구간을 펼쳐 학습하고, 실행 때는 은닉 상태를 이어 간다.
 - 검증 손실이 가장 낮은 가중치를 <out>/policy.pt로 저장 (정규화 값, 입력 묶음, 모델 설정 포함).
@@ -25,7 +26,22 @@ import numpy as np
 import torch
 from torch import nn
 
-from .features import ACTION_NAMES, GROUPS, obs_index
+from .features import ACTION_NAMES, GROUPS
+
+DEFAULT_GROUPS = ('section', 'profile', 'progress', 'mode')
+
+
+def group_names(groups) -> list[str]:
+    return [n for g in groups for n in GROUPS[g]]
+
+
+def columns(all_names, names) -> np.ndarray:
+    """관측 열 이름 → all_names 안의 번호. 없는 이름이 있으면 오류 (예: 프로파일 없는 이전 데이터)."""
+    all_names = [str(n) for n in all_names]
+    missing = [n for n in names if n not in all_names]
+    if missing:
+        raise SystemExit(f'데이터에 없는 관측 {len(missing)}개 (예: {missing[0]}). 변환을 다시 하거나 --obs를 줄이세요.')
+    return np.array([all_names.index(n) for n in names])
 
 
 class MLPPolicy(nn.Module):
@@ -68,7 +84,10 @@ class Policy:
         self.net = build(self.cfg)
         self.net.load_state_dict(ck['state'])
         self.net.eval()
-        self.idx = np.array(self.cfg['obs_idx'])
+        if 'obs_names' not in self.cfg:
+            raise SystemExit(f'{path}: 관측 이름이 없는 이전 형식 정책입니다. 다시 학습하세요.')
+        from .features import OBS_NAMES
+        self.idx = columns(OBS_NAMES, self.cfg['obs_names'])
         self.mu_o, self.sd_o = np.array(ck['mu_o']), np.array(ck['sd_o'])
         self.mu_a, self.sd_a = np.array(ck['mu_a']), np.array(ck['sd_a'])
         self.h = None
@@ -84,7 +103,7 @@ class Policy:
 
     @torch.no_grad()
     def predict_episode(self, obs: np.ndarray) -> np.ndarray:
-        """한 에피소드 관측 (T, 43) → 행동 (T, 7). 열린 루프 평가용."""
+        """한 에피소드 관측 (T, 61, OBS_NAMES 순서) → 행동 (T, 7). 열린 루프 평가용."""
         x = (obs[:, self.idx] - self.mu_o) / self.sd_o
         y, _ = self.net(torch.as_tensor(x, dtype=torch.float32)[None])
         return y[0].numpy() * self.sd_a + self.mu_a
@@ -112,13 +131,14 @@ def windows(fr: dict, eps: list[int], seq: int) -> tuple[np.ndarray, np.ndarray]
     return np.array(X), np.array(Y)
 
 
-def train(data: str, out: str, model: str = 'mlp', groups=('section', 'torch', 'progress', 'mode'),
+def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
           epochs: int = 40, seq: int = 20, hidden: int | None = None, layers: int | None = None, lr: float = 1e-3,
           batch: int = 256, seed: int = 0, verbose: bool = True) -> dict:
     torch.manual_seed(seed)
     np.random.seed(seed)
     fr = load_frames(data)
-    idx = obs_index(groups)
+    names = group_names(groups)
+    idx = columns(fr['obs_names'], names)
     tr, va = episodes_of(fr, 'train'), episodes_of(fr, 'val')
     if not tr:
         raise SystemExit('학습 에피소드가 없음')
@@ -133,7 +153,7 @@ def train(data: str, out: str, model: str = 'mlp', groups=('section', 'torch', '
     norm = lambda X, mu, sd: torch.as_tensor((X - mu) / sd, dtype=torch.float32)  # noqa: E731
     xt, yt = norm(Xtr, mu_o, sd_o), norm(Ytr, mu_a, sd_a)
     xv, yv = norm(Xva, mu_o, sd_o), norm(Yva, mu_a, sd_a)
-    cfg = {'model': model, 'groups': list(groups), 'obs_idx': idx.tolist(), 'n_in': len(idx),
+    cfg = {'model': model, 'groups': list(groups), 'obs_names': names, 'n_in': len(idx),
            'n_out': len(ACTION_NAMES), 'hidden': hidden or (256 if model == 'mlp' else 128),
            'layers': layers or (2 if model == 'mlp' else 1), 'seq': seq_len, 'fps': int(fr['fps'])}
     net = build(cfg)
@@ -154,7 +174,7 @@ def train(data: str, out: str, model: str = 'mlp', groups=('section', 'torch', '
             loss.backward()
             nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
-            tl += float(loss) * len(b)
+            tl += loss.item() * len(b)
         sched.step()
         net.eval()
         with torch.no_grad():
@@ -186,7 +206,7 @@ def main(argv=None):
     ap.add_argument('data', help='to_lerobot.py 출력 폴더 (frames.npz)')
     ap.add_argument('--out', required=True)
     ap.add_argument('--model', choices=('mlp', 'gru'), default='mlp')
-    ap.add_argument('--obs', default='section,torch,progress,mode', help=f'입력 묶음 ({", ".join(GROUPS)})')
+    ap.add_argument('--obs', default=','.join(DEFAULT_GROUPS), help=f'입력 묶음 ({", ".join(GROUPS)})')
     ap.add_argument('--epochs', type=int, default=40)
     ap.add_argument('--seq', type=int, default=20, help='GRU 학습 구간 길이 (프레임)')
     ap.add_argument('--hidden', type=int)

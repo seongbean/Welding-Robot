@@ -255,3 +255,40 @@ def test_single_error_scenarios(cfg):
     assert z['shape']['tacks'] == [] and z['heat']['bow'] == 0 and z['icp']['xyz'] == [0.0, 0.0, 0.0]
     with pytest.raises(ValueError):
         single_error(base, 'nope')
+
+
+def test_section_fit_matches_label_without_noise(cfg):
+    """평면 맞춤 단면: 노이즈가 없으면 토치 앞 측정 위치의 정답(좌우, 높이+가접, 틈새, 작업각, 진행각)과 같다.
+    패치가 아크 앞에 있을 때(용접 중 실제 측정 위치) 각도 차이 0.01° 이내."""
+    for seed in range(5):
+        m = PartErrorModel(sample_scenario(cfg, np.random.default_rng(seed)))
+        for s_look, s_arc in ((0.2, 0.1), (0.6, 0.5), (0.95, 0.85)):
+            f = m.section_fit(s_look, s_arc, None)
+            lab = m.label(s_look, s_arc)
+            assert np.allclose(f[:2], [lab['e'][1], lab['e'][2] + lab['tack']], atol=0.03 * MM)
+            assert f[2] == pytest.approx(lab['gap'], abs=1e-12)
+            assert np.allclose(f[3:], lab['rotvec'][:2], atol=0.01 * DEG)
+
+
+def test_section_fit_sees_work_angle(cfg):
+    """작업각(이음매 축 둘레 회전)은 뿌리 위치를 안 바꾸지만 평면 맞춤 각도에는 나온다."""
+    scn = zero_scenario(cfg)
+    scn['icp']['rotvec'] = [1.0 * DEG, 0.0, 0.0]      # 추정 경로가 이음매 축 둘레로 1° 돌아감
+    m = PartErrorModel(scn)
+    f = m.section_fit(0.5, 0.0, None)
+    lab = m.label(0.5, 0.0)
+    assert abs(lab['rotvec'][0]) > 0.5 * DEG
+    assert f[3] == pytest.approx(lab['rotvec'][0], abs=0.01 * DEG)
+
+
+def test_section_noise_and_dropout(cfg):
+    scn = sample_scenario(cfg, np.random.default_rng(3))
+    m = PartErrorModel(scn)
+    rng = np.random.default_rng(0)
+    F = np.array([m.laser(0.4, 0.3, rng) for _ in range(400)])
+    ok = np.isfinite(F[:, 0])
+    assert abs(1 - ok.mean() - scn['sensors']['laser_dropout']) < 0.04
+    lab = m.label(0.4 + scn['sensors']['laser_lookahead'] / m.L, 0.3)
+    sd = F[ok].std(axis=0)
+    assert np.all(sd[:2] < 0.1 * MM) and np.all(sd[3:] < 1.0 * DEG) and np.all(sd[3:] > 0)
+    assert np.allclose(F[ok, 3:].mean(axis=0), lab['rotvec'][:2], atol=0.1 * DEG)

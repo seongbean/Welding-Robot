@@ -183,13 +183,20 @@ def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None
             'gap_close': _uni(rng, inw['gap_close_mm']) * MM,
         },
         'prior': {'base_angle': 0.0, 'web_tilt': 0.0, 'bow': 0.0},   # 앞 패스의 잔류 변형
-        'sensors': {
-            'laser_lookahead': cfg['sensors']['laser_lookahead_mm'] * MM,
-            'laser_noise': cfg['sensors']['laser_noise_mm'] * MM,
-            'laser_dropout': float(cfg['sensors']['laser_dropout']),
-        },
+        'sensors': sensors_from_cfg(cfg['sensors']),
         'expert': copy.deepcopy(cfg.get('expert', {})),
     }
+
+
+def sensors_from_cfg(c: dict) -> dict:
+    """config sensors 섹션 (mm, 비율) → 시나리오 sensors (m)."""
+    return {'laser_lookahead': c['laser_lookahead_mm'] * MM, 'laser_noise': c['laser_noise_mm'] * MM,
+            'laser_dropout': float(c['laser_dropout']),
+            'laser_point_noise': c.get('laser_point_noise_mm', 0.2) * MM,
+            'laser_point_dropout': float(c.get('laser_point_dropout', 0.1)),
+            'laser_patch_along': c.get('laser_patch_along_mm', 10.0) * MM,
+            'laser_patch_across': c.get('laser_patch_across_mm', 15.0) * MM,
+            'laser_point_step': c.get('laser_point_step_mm', 1.0) * MM}
 
 
 def next_pass(scn: dict, cfg: dict, rng: np.random.Generator) -> dict:
@@ -291,8 +298,8 @@ class PartErrorModel:
         s = np.atleast_1d(np.asarray(s, dtype=float))
         return np.stack([s * self.L, self.web_lateral(s), self.base_height(s, s_arc)], axis=-1) + self.slip(s_arc)
 
-    def seam_true(self, s, s_arc):
-        """실제 경로: (점 (n,3), 이음매 좌표계 (n,3,3)) 로봇 베이스 기준."""
+    def _seam_geom(self, s, s_arc):
+        """실제 이음매 점, 이음매 좌표계, 바닥 판 면 법선, 웹 판 용접 쪽 면 법선 (모두 로봇 베이스 기준)."""
         s = np.atleast_1d(np.asarray(s, dtype=float))
         h = 1e-3
         P = self._seam_part(s, s_arc)
@@ -305,7 +312,12 @@ class PartErrorModel:
         y = np.cross(z, tx)
         R_part = np.stack([tx, y, z], axis=-1)
         Rw, tw = self.T_place[:3, :3], self.T_place[:3, 3]
-        return P @ Rw.T + tw, Rw @ R_part
+        return P @ Rw.T + tw, Rw @ R_part, n_base @ Rw.T, n_web @ Rw.T
+
+    def seam_true(self, s, s_arc):
+        """실제 경로: (점 (n,3), 이음매 좌표계 (n,3,3)) 로봇 베이스 기준."""
+        P, R, _, _ = self._seam_geom(s, s_arc)
+        return P, R
 
     def seam_est(self, s):
         s = np.atleast_1d(np.asarray(s, dtype=float))
@@ -323,21 +335,79 @@ class PartErrorModel:
                 'p_true': p_t[0], 'R_true': R_t[0], 'p_est': p_e[0], 'R_est': R_e[0]}
 
     def laser(self, s_torch: float, s_arc: float, rng: np.random.Generator):
-        """이음매 단면 센서 (손목 depth 카메라 단면): 토치 앞 lookahead 지점의 [좌우, 높이, 틈새 폭] [m].
+        """이음매 단면 센서 (손목 depth 카메라): 토치 앞 lookahead 지점의
+        [좌우, 높이, 틈새 폭 [m], 작업각, 진행각 [rad]].
 
-        좌우·높이는 추정 경로 좌표계 기준 편차다. 실기에서는 카메라가 토치에 붙어 있으므로 토치 기준으로 잰 값에
-        측정 순간의 토치 자세(로봇이 FK로 안다)를 더해 같은 값을 만든다. 가접 위에서는 높이에 가접이 들어간다.
-        측정 실패(금속 반사로 생긴 구멍, 이음매 끝을 넘음)는 NaN 세 개.
+        카메라가 보는 작은 패치(이음매 방향 laser_patch_along, 판마다 laser_patch_across)의 두 판 면 위 점을 뽑아
+        점마다 노이즈(laser_point_noise)와 측정 구멍(laser_point_dropout)을 넣고, 판마다 평면을 맞춘다.
+        두 평면의 교선이 이음매 뿌리선이다.
+        - 좌우·높이: 추정 경로 좌표계에서 본 뿌리선 위치 (가접 위에서는 높이에 가접 포함)
+        - 작업각·진행각: 두 평면이 만드는 이음매 좌표계(x = 교선, z = 두 법선의 이등분)를 추정 좌표계에서 본 회전
+          (정답 rotvec과 같은 정의, 측정 위치는 토치 앞)
+        - 틈새 폭: 정답 + 노이즈(laser_noise)
+        실기에서는 카메라가 토치에 붙어 있으므로 토치 기준으로 맞춘 값에 측정 순간의 토치 자세(FK)를 더해 같은 값을 만든다.
+        전체 측정 실패(laser_dropout, 이음매 끝을 넘음)는 NaN 다섯 개.
         """
         se = self.scn['sensors']
         s_look = s_torch + se['laser_lookahead'] / self.L
         if s_look > 1.0 or rng.uniform() < se['laser_dropout']:
-            return np.full(3, np.nan)
-        lab = self.label(s_look, s_arc)
-        meas = np.array([lab['e'][1], lab['e'][2] + lab['tack'], lab['gap']])
-        meas = meas + rng.normal(scale=se['laser_noise'], size=3)
-        meas[2] = max(0.0, meas[2])
-        return meas
+            return np.full(5, np.nan)
+        return self.section_fit(s_look, s_arc, rng)
+
+    def section_fit(self, s_look: float, s_arc: float, rng: np.random.Generator | None = None) -> np.ndarray:
+        """s_look 위치 단면 패치의 평면 맞춤 측정 (laser 설명 참고). rng=None이면 노이즈·구멍 없음."""
+        se = self.scn['sensors']
+        along = se.get('laser_patch_along', 0.01)
+        across = se.get('laser_patch_across', 0.015)
+        step = se.get('laser_point_step', 0.001)
+        sig = se.get('laser_point_noise', 0.0) if rng is not None else 0.0
+        drop = se.get('laser_point_dropout', 0.0) if rng is not None else 0.0
+        a = np.arange(-along / 2, along / 2 + 1e-9, step)
+        s_pts = np.clip(s_look + a / self.L, 0.0, 1.0)
+        P, R, nb, nw = self._seam_geom(s_pts, s_arc)
+        tx = R[:, :, 0]
+        ub = _normalize(np.cross(tx, nb))        # 바닥 판 면 위, 토치 쪽으로
+        uw = _normalize(np.cross(nw, tx))        # 웹 판 면 위, 위로
+        gap = float(self.gap(np.array([s_look]), s_arc)[0])
+        r = np.arange(step, across + 1e-9, step)
+        base = (P[:, None, :] + ub[:, None, :] * r[None, :, None]).reshape(-1, 3)
+        web = (P[:, None, :] + uw[:, None, :] * (gap + r)[None, :, None]).reshape(-1, 3)   # 틈새 위로만 보임
+        planes = []
+        for pts in (base, web):
+            if rng is not None:
+                pts = pts + rng.normal(scale=sig, size=pts.shape) if sig > 0 else pts
+                if drop > 0:
+                    pts = pts[rng.uniform(size=len(pts)) >= drop]
+            if len(pts) < 6:
+                return np.full(5, np.nan)
+            c = pts.mean(axis=0)
+            n = np.linalg.svd(pts - c, full_matrices=False)[2][-1]
+            planes.append((c, n))
+        (cb, nb_f), (cw, nw_f) = planes
+        # 법선 방향은 추정 모재 좌표계로 정함 (로봇이 아는 값): 바닥 판 +z, 웹 판 -y
+        Re_part = self.T_est[:3, :3]
+        if nb_f @ Re_part[:, 2] < 0:
+            nb_f = -nb_f
+        if nw_f @ -Re_part[:, 1] < 0:
+            nw_f = -nw_f
+        p_e, R_e = self.seam_est(np.array([s_look]))
+        p_e, R_e = p_e[0], R_e[0]
+        d = np.cross(nb_f, nw_f)
+        d /= np.linalg.norm(d)
+        if d @ R_e[:, 0] < 0:
+            d = -d
+        # 두 평면의 교선 위에서 추정 경로 점에 가장 가까운 점
+        A = np.stack([nb_f, nw_f, d])
+        root = np.linalg.solve(A, np.array([nb_f @ cb, nw_f @ cw, d @ p_e]))
+        bis = nb_f + nw_f
+        z = bis - (bis @ d) * d
+        z /= np.linalg.norm(z)
+        R_m = np.stack([d, np.cross(z, d), z], axis=-1)
+        e = R_e.T @ (root - p_e)
+        rv = R_to_rotvec(R_e.T @ R_m)
+        tack = float(self.tack_height([s_look])[0])
+        g = gap + (rng.normal(scale=se['laser_noise']) if rng is not None else 0.0)
+        return np.array([e[1], e[2] + tack, max(0.0, g), rv[0], rv[1]])
 
     # --- 모재 메시 변형 (Isaac Sim 표시용)
     def deform_points(self, P, plate, s_arc) -> np.ndarray:
@@ -400,7 +470,7 @@ def zero_errors(scn: dict) -> dict:
     z['slip'].update(drift=[0.0, 0.0, 0.0], jump=[0.0, 0.0, 0.0])
     z['heat'].update(base_angle=0.0, web_tilt=0.0, bow=0.0, gap_close=0.0)
     z['prior'] = {'base_angle': 0.0, 'web_tilt': 0.0, 'bow': 0.0}
-    z['sensors'].update(laser_noise=0.0, laser_dropout=0.0)
+    z['sensors'].update(laser_noise=0.0, laser_dropout=0.0, laser_point_noise=0.0, laser_point_dropout=0.0)
     return z
 
 

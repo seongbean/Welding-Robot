@@ -27,13 +27,15 @@ import numpy as np
 from sim_errors.expert import ScriptedExpert
 from sim_errors.part_errors import DEG, MM, PartErrorModel, rotvec_to_R
 
-from .features import ACTION_NAMES, FPS, SectionBuffer, load_episode, make_obs, torch_offset
+from .features import ACTION_NAMES, FPS, OBS_NAMES, SectionBuffer, load_episode, make_obs, torch_offset
 from .train_bc import Policy, load_frames
 
 AXES = ('lateral', 'height', 'work', 'travel')
 
 
 def open_loop(policy: Policy, fr: dict, eps: list[int]) -> dict:
+    if [str(n) for n in fr['obs_names']] != OBS_NAMES:
+        raise SystemExit('데이터 관측 형식이 지금 코드와 다릅니다. learning.to_lerobot으로 다시 변환하세요.')
     P, Y = [], []
     for e in eps:
         m = fr['episode_index'] == e
