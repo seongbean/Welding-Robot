@@ -110,3 +110,29 @@ def test_failed_episodes_are_skipped(small_batch, tmp_path):
         json.dump({'episodes': [{'file': 'mixed_0000.npz', 'ok': False, 'reason': '시험'}]}, f)
     r = convert(str(d), str(tmp_path / 'data'), lerobot=False)
     assert r['episodes'] == 15 and r['skipped'] == [('mixed_0000.npz', '시험')]
+
+
+def test_train_subsets_and_parallel_eval(small_batch, tmp_path):
+    pytest.importorskip('torch')
+    import json
+    from learning.evaluate import evaluate
+    from learning.train_bc import load_frames, pick_train, train
+    root, ep_dir = small_batch
+    data = str(tmp_path / 'data')
+    convert(str(ep_dir), data, lerobot=False)
+    fr = load_frames(data)
+    tr = [i for i, s in enumerate(fr['ep_split']) if s == 'train']
+    assert fr['ep_perturb'].any() and not fr['ep_perturb'].all()
+    # 같은 시드면 작은 N이 큰 N의 부분집합, 강도가 고루 들어감
+    small, big = pick_train(fr, tr, 3, seed=1), pick_train(fr, tr, 6, seed=1)
+    assert len(small) == 3 and len(big) == 6 and set(small) <= set(big)
+    assert len({str(fr['ep_kind'][e]) for e in big}) >= 2
+    calm = pick_train(fr, tr, no_perturb=True)
+    assert calm and not any(fr['ep_perturb'][e] for e in calm)
+    out = str(tmp_path / 'sub')
+    res = train(data, out, epochs=1, max_train=4, verbose=False)
+    log = json.load(open(os.path.join(out, 'train_log.json'), encoding='utf-8'))
+    assert res['train_episodes'] == 4 and len(log['train_files']) == 4
+    one = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False)
+    two = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False, jobs=2)
+    assert one['closed_loop']['all'] == two['closed_loop']['all']
