@@ -1,0 +1,147 @@
+name: Experiment (kinematic gen + BC train + eval)
+
+# 오래 걸리는 실험(운동학 사양 묶음 생성 → 변환 → MLP/GRU 학습 → 닫힌 루프 평가)을 GitHub에서 돌린다.
+# 브랜치에서 이 파일이나 learning/, sim_errors/를 바꿔 push하면 돌고, Actions 탭에서 손으로도 돌릴 수 있다.
+# 결과: 실행 요약(Summary)의 표, 그리고 eval-* 아티팩트(eval.json).
+# 지금 실험: 용접 전 시작 구간 스캔(prescan) 있음/없음 비교 (MLP, GRU, 규칙 기준선).
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: '묶음 개수 배율 (1.0 = 사양 330개)'
+        default: '1.0'
+  push:
+    branches: ['claude/**']
+    paths: ['.github/workflows/experiment.yml', 'learning/**', 'sim_errors/**']
+
+env:
+  SCALE: ${{ github.event.inputs.scale || '1.0' }}
+  SHARDS: 6
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy pyyaml
+      - name: Make batch and pick this shard
+        run: |
+          python -m sim_errors.make_scenarios --batch --scale "$SCALE" --out batch_all
+          mkdir -p batch
+          ls batch_all/*.json | sort | awk -v n="$SHARDS" -v k=${{ matrix.shard }} 'NR % n == k' | xargs -I{} cp {} batch/
+          ls batch | wc -l
+      - name: Kinematic episodes
+        run: python sim_bridge/run_batch.py batch --out episodes --kinematic --jobs 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: episodes-${{ matrix.shard }}
+          path: episodes/*.npz
+          retention-days: 7
+
+  train:
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install numpy pyyaml
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: episodes-*
+          path: episodes
+          merge-multiple: true
+      - name: Convert (with and without start-zone scan)
+        run: |
+          python -m learning.to_lerobot episodes --out data_scan --no-lerobot
+          python -m learning.to_lerobot episodes --out data_noscan --no-lerobot --no-prescan
+      - name: Train
+        run: |
+          python -m learning.train_bc data_scan --model mlp --out runs/mlp_scan
+          python -m learning.train_bc data_noscan --model mlp --out runs/mlp_noscan
+          python -m learning.train_bc data_scan --model gru --out runs/gru_scan
+          python -m learning.train_bc data_noscan --model gru --out runs/gru_noscan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runs
+          path: |
+            runs/
+            data_scan/
+            data_noscan/
+          retention-days: 7
+
+  evaluate:
+    needs: train
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        policy: [mlp_scan, mlp_noscan, gru_scan, gru_noscan, rule, rule-noprescan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install numpy pyyaml
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: episodes-*
+          path: episodes
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: runs
+          path: .
+      - name: Closed-loop evaluation
+        run: |
+          p=${{ matrix.policy }}
+          case "$p" in
+            rule) python -m learning.evaluate rule --data data_scan --episodes episodes --jobs 2 --rule-dir runs ;;
+            rule-noprescan) python -m learning.evaluate rule-noprescan --data data_noscan --episodes episodes --jobs 2 --rule-dir runs ;;
+            *scan) d=data_scan; [[ "$p" == *noscan ]] && d=data_noscan
+                   python -m learning.evaluate runs/$p/policy.pt --data $d --episodes episodes --jobs 2 ;;
+          esac
+          mkdir -p out/$p && cp runs/$p/eval.json out/$p/
+          [ -f runs/$p/train_log.json ] && cp runs/$p/train_log.json out/$p/ || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.policy }}
+          path: out/
+          retention-days: 30
+
+  report:
+    needs: evaluate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: eval-*
+          path: out
+          merge-multiple: true
+      - name: Summary table
+        run: |
+          {
+            echo "## 닫힌 루프 평가 (전체 시험)"
+            python -m learning.report_evals out/*/eval.json
+            echo
+            echo "## 가혹 묶음"
+            python -m learning.report_evals out/*/eval.json --kind hard
+            echo
+            echo "## 혼합 묶음"
+            python -m learning.report_evals out/*/eval.json --kind mixed
+          } | tee -a "$GITHUB_STEP_SUMMARY"

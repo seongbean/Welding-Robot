@@ -3,6 +3,7 @@
 관측 (에피소드 생성 사양 "기록 형식", 단위 mm·deg)
 - section: 단면 거리 버퍼. 토치 뒤 10 mm부터 앞 30 mm까지 5 mm 간격 9점 × (좌우, 높이, 틈새 폭) + 9점 유효 표시.
   단면 센서는 토치 앞 30 mm만 재므로, 잰 값을 잰 이음매 위치와 함께 쌓아 두고 지금 토치 위치 기준으로 꺼낸다.
+  용접 전 시작 구간 스캔(시나리오 sensors.prescan, 아크 끄고 시작 30 mm)이 있으면 그 측정으로 버퍼를 먼저 채운다.
   값은 추정 경로 좌표계 편차 (카메라가 토치에 붙어 있어 토치 기준으로 잰 값 + 그때의 토치 자세).
   아직 못 잰 점과 측정 실패는 0 + 유효 0.
 - profile: 같은 버퍼 9점 × (작업각, 진행각). 단면 패치의 두 판 면 평면 맞춤으로 구한 이음매 좌표계 회전.
@@ -83,6 +84,20 @@ class SectionBuffer:
         return vals, valid
 
 
+def prescan_rng(scn: dict) -> np.random.Generator:
+    """시작 구간 스캔 노이즈 난수: 시나리오마다 고정 (변환을 다시 해도 같은 값)."""
+    epi = scn.get('episode', {})
+    return np.random.default_rng([int(scn.get('seed') or 0), int(epi.get('perturb_seed', 0)), 11])
+
+
+def fill_prescan(buf: SectionBuffer, model: PartErrorModel, rng: np.random.Generator | None) -> int:
+    """용접 전 시작 구간 스캔 측정으로 버퍼를 채운다. 반환: 넣은 측정 수 (스캔 설정이 없으면 0)."""
+    s_pts, meas = model.prescan(rng)
+    for sp, m in zip(s_pts, meas):
+        buf.add(float(sp), m)
+    return len(s_pts)
+
+
 def torch_offset(model: PartErrorModel, s: float, T: np.ndarray) -> np.ndarray:
     """토치 포즈 T의 추정 경로 기준 어긋남 [좌우 mm, 높이 mm, 작업각 deg, 진행각 deg] (토치 롤은 무시)."""
     ex = model.scn['expert']
@@ -125,14 +140,18 @@ def load_episode(path: str) -> tuple[dict, dict, dict]:
     return rows, scn, meta
 
 
-def episode_frames(rows: dict, scn: dict, fps: int = FPS) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """100 Hz 기록 → fps 프레임 (관측 (n,61), 행동 (n,7), 시각 (n,)). 용접 구간(아크 ON)만."""
+def episode_frames(rows: dict, scn: dict, fps: int = FPS, prescan: bool = True
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """100 Hz 기록 → fps 프레임 (관측 (n,61), 행동 (n,7), 시각 (n,)). 용접 구간(아크 ON)만.
+    prescan: 시나리오에 시작 구간 스캔 설정이 있으면 버퍼를 먼저 채운다 (스캔은 시나리오만으로 정해져 기록에 없음)."""
     model = PartErrorModel(scn)
     look = scn['sensors']['laser_lookahead'] / model.L
     mode = scn.get('episode', {}).get('mode', 'weave')
     tf = scn['expert']['tack_follow']
     weld = np.flatnonzero(rows['arc_on'].astype(bool))
     buf = SectionBuffer(model.L)
+    if prescan:
+        fill_prescan(buf, model, prescan_rng(scn))
     t0 = float(rows['t'][weld[0]])
     next_t = t0
     obs, act, ts = [], [], []

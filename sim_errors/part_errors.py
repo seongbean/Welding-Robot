@@ -196,7 +196,8 @@ def sensors_from_cfg(c: dict) -> dict:
             'laser_point_dropout': float(c.get('laser_point_dropout', 0.1)),
             'laser_patch_along': c.get('laser_patch_along_mm', 10.0) * MM,
             'laser_patch_across': c.get('laser_patch_across_mm', 15.0) * MM,
-            'laser_point_step': c.get('laser_point_step_mm', 1.0) * MM}
+            'laser_point_step': c.get('laser_point_step_mm', 1.0) * MM,
+            'prescan': c.get('prescan_mm', 0.0) * MM, 'prescan_step': c.get('prescan_step_mm', 0.5) * MM}
 
 
 def next_pass(scn: dict, cfg: dict, rng: np.random.Generator) -> dict:
@@ -353,6 +354,24 @@ class PartErrorModel:
         if s_look > 1.0 or rng.uniform() < se['laser_dropout']:
             return np.full(5, np.nan)
         return self.section_fit(s_look, s_arc, rng)
+
+    def prescan(self, rng: np.random.Generator | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """용접 전 시작 구간 스캔: 아크를 켜기 전(s_arc = 0)에 손목 카메라로 이음매 시작 prescan 길이를 훑는다.
+
+        단면 센서는 토치 앞 lookahead에서만 재므로 스캔이 없으면 시작 구간(첫 가접이 있는 곳)은 한 번도 보이지 않는다.
+        반환: (측정 위치 진행도 (n,), 측정 (n,5) laser와 같은 형식, 실패는 NaN). 설정이 없거나 0이면 빈 배열.
+        """
+        se = self.scn['sensors']
+        length = float(se.get('prescan', 0.0))
+        if length <= 0:
+            return np.zeros(0), np.zeros((0, 5))
+        step = float(se.get('prescan_step', 0.0005))
+        s_pts = np.arange(0.0, min(length, self.L) + 1e-9, step) / self.L
+        meas = np.full((len(s_pts), 5), np.nan)
+        for k, sp in enumerate(s_pts):
+            if rng is None or rng.uniform() >= se['laser_dropout']:
+                meas[k] = self.section_fit(float(sp), 0.0, rng)
+        return s_pts, meas
 
     def section_fit(self, s_look: float, s_arc: float, rng: np.random.Generator | None = None) -> np.ndarray:
         """s_look 위치 단면 패치의 평면 맞춤 측정 (laser 설명 참고). rng=None이면 노이즈·구멍 없음."""

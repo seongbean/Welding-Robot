@@ -14,6 +14,8 @@
    위빙·속도는 전문가 규칙값과의 차이로 본다.
 결과 표는 강도(혼합·단독·깨끗함·가혹)별로 나오고, <정책 폴더>/eval.json에 저장된다.
 닫힌 루프는 에피소드마다 오래 걸리므로(운동학 한 에피소드 수십 초) --jobs N으로 나눠 돌린다.
+정책 자리에 'rule'(또는 'rule-noprescan')을 주면 학습 없는 규칙 기준선(버퍼의 토치 위치 값을 그대로 씀)을 평가한다.
+높이 오차는 시작 30 mm와 나머지로도 나눠 보여 준다(시작 구간은 단면 센서가 토치 앞 30 mm만 재서 사각지대가 된다).
 보정 0 오차가 0.01(mm 또는 deg)보다 작은 강도(깨끗함, 각도 오차가 없는 단독 오차)는 개선율 칸에 -를 쓴다.
 """
 from __future__ import annotations
@@ -30,21 +32,80 @@ import numpy as np
 from sim_errors.expert import ScriptedExpert
 from sim_errors.part_errors import DEG, MM, PartErrorModel, rotvec_to_R
 
-from .features import ACTION_NAMES, FPS, OBS_NAMES, SectionBuffer, load_episode, make_obs, torch_offset
-from .train_bc import Policy, load_frames
+from .features import (ACTION_NAMES, BUF_OFFSETS_MM, FPS, OBS_NAMES, SectionBuffer, fill_prescan, load_episode,
+                       make_obs, torch_offset)
 
 AXES = ('lateral', 'height', 'work', 'travel')
+RULES = {'rule': True, 'rule-noprescan': False}   # 정책 자리에 쓰는 규칙 기준선 이름 → 시작 구간 스캔 여부
 
 
-def open_loop(policy: Policy, fr: dict, eps: list[int]) -> dict:
+class RulePolicy:
+    """학습 없는 기준선: 단면 버퍼에서 토치 위치(0 mm) 값을 그대로 보정으로 쓴다 (없으면 가장 가까운 유효 점).
+    속도·위빙은 잰 틈새로 전문가 규칙을 그대로 쓴다. 정책이 센서 한계에 닿았는지 볼 때 비교한다."""
+
+    K0 = int(np.flatnonzero(BUF_OFFSETS_MM == 0)[0])
+
+    def __init__(self, name: str = 'rule'):
+        self.cfg = {'model': 'rule', 'groups': ['section', 'profile', 'mode'], 'prescan': RULES[name]}
+        self.ex = None
+        self.last = np.zeros(4)
+
+    def bind(self, scn: dict) -> None:
+        self.ex = ScriptedExpert(PartErrorModel(scn), np.eye(4), weld_only=True)
+
+    def reset(self):
+        self.last = np.zeros(4)
+
+    def __call__(self, obs: np.ndarray) -> np.ndarray:
+        n = len(BUF_OFFSETS_MM)
+        valid = obs[3 * n:4 * n]
+        if valid.any():
+            j = np.flatnonzero(valid)
+            k = int(j[np.argmin(np.abs(j - self.K0))])
+            self.last = np.array([obs[3 * k], obs[3 * k + 1], obs[4 * n + 2 * k], obs[4 * n + 2 * k + 1]])
+            gap = float(obs[3 * k + 2])
+        else:
+            gap = 0.0
+        mode = 'weave' if obs[OBS_NAMES.index('mode_weave')] > 0.5 else 'straight'
+        if self.ex is None:
+            raise RuntimeError('RulePolicy.bind(scn)를 먼저 불러야 합니다')
+        self.ex.mode = mode
+        amp, v = self.ex.process(gap * MM)
+        return np.r_[self.last, v / MM, amp / MM, self.ex.weave_hz].astype(np.float32)
+
+    def predict_episode(self, obs: np.ndarray) -> np.ndarray:
+        self.reset()
+        return np.array([self(o) for o in obs])
+
+
+def load_frames(path: str) -> dict:
+    """frames.npz (train_bc.load_frames와 같음. 규칙 기준선은 torch 없이 돌도록 여기 둠)."""
+    d = np.load(os.path.join(path, 'frames.npz'), allow_pickle=False)
+    return {k: d[k] for k in d.files}
+
+
+def load_policy(path: str):
+    if path in RULES:
+        return RulePolicy(path)
+    from .train_bc import Policy
+    return Policy(path)
+
+
+def open_loop(policy, fr: dict, eps: list[int], scenarios: dict | None = None) -> dict:
     if [str(n) for n in fr['obs_names']] != OBS_NAMES:
         raise SystemExit('데이터 관측 형식이 지금 코드와 다릅니다. learning.to_lerobot으로 다시 변환하세요.')
     P, Y = [], []
     for e in eps:
         m = fr['episode_index'] == e
+        if hasattr(policy, 'bind'):
+            if not scenarios:
+                continue
+            policy.bind(scenarios[e])
         policy.reset()
         P.append(policy.predict_episode(fr['obs'][m]))
         Y.append(fr['action'][m])
+    if not P:
+        return {}
     P, Y = np.concatenate(P), np.concatenate(Y)
     return {n: {'rmse': float(np.sqrt(np.mean((P[:, k] - Y[:, k]) ** 2))),
                 'zero_rmse': float(np.sqrt(np.mean(Y[:, k] ** 2))) if k < 4 else None}
@@ -74,8 +135,10 @@ def truth(model: PartErrorModel, s: float) -> np.ndarray:
                      lab['rotvec'][0] / DEG, lab['rotvec'][1] / DEG]), lab['gap']
 
 
-def closed_loop(policy: Policy, scn: dict, sensor_seed: int = 0, dt: float = 0.01, fps: int = FPS) -> dict:
-    """운동학 닫힌 루프 한 에피소드."""
+def closed_loop(policy, scn: dict, sensor_seed: int = 0, dt: float = 0.01, fps: int = FPS,
+                start_zone_mm: float = 30.0) -> dict:
+    """운동학 닫힌 루프 한 에피소드. 정책 cfg의 prescan이 참이면(그렇게 변환한 데이터로 학습) 용접 전 시작 구간
+    스캔으로 버퍼를 먼저 채운다. 높이 오차는 시작 구간(처음 start_zone_mm)과 나머지로도 나눠 낸다."""
     model = PartErrorModel(scn)
     ex = scn['expert']
     epi = scn.get('episode', {})
@@ -85,13 +148,17 @@ def closed_loop(policy: Policy, scn: dict, sensor_seed: int = 0, dt: float = 0.0
     look = scn['sensors']['laser_lookahead'] / model.L
     v_nom = ex['travel_speed_mm_s']
     buf = SectionBuffer(model.L)
+    if policy.cfg.get('prescan', False):
+        fill_prescan(buf, model, rng)
+    if hasattr(policy, 'bind'):
+        policy.bind(scn)
     so = np.array(epi.get('start_offset', [0.0] * 4))
     c = truth(model, 0.0)[0] + np.array([so[0] / MM, so[1] / MM, so[2] / DEG, so[3] / DEG])   # 놓인 자세
     speed, amp, hz = v_nom, 0.0, 0.0
     s = t = phase = 0.0
     every = int(round(1.0 / (fps * dt)))
     policy.reset()
-    err, base, proc = [], [], []
+    err, base, proc, s_log = [], [], [], []
     k = 0
     t_max = 3 * model.L / (v_nom * MM)
     while s < 1.0 and t < t_max:
@@ -107,6 +174,7 @@ def closed_loop(policy: Policy, scn: dict, sensor_seed: int = 0, dt: float = 0.0
         tr, gap = truth(model, s)
         err.append(c - tr)
         base.append(-tr)
+        s_log.append(s)
         amp_r, v_r = rule.process(gap)
         proc.append([speed - v_r / MM, amp - amp_r / MM, hz - rule.weave_hz])
         s = min(1.0, s + speed * MM * dt / model.L)
@@ -121,6 +189,10 @@ def closed_loop(policy: Policy, scn: dict, sensor_seed: int = 0, dt: float = 0.0
         out[n + '_p95'] = float(np.percentile(np.abs(err[:, j]), 95))
     for j, n in enumerate(('speed', 'weave_amp', 'weave_hz')):
         out[n + '_err'] = float(np.sqrt(np.mean(proc[:, j] ** 2)))
+    start = np.array(s_log) * model.L < start_zone_mm * MM
+    out['height_sq_start'] = float(np.sum(err[start, 1] ** 2))      # 시작 구간 높이 제곱오차 합 (나눔 요약용)
+    out['height_sq_rest'] = float(np.sum(err[~start, 1] ** 2))
+    out['n_start'], out['n_rest'] = int(start.sum()), int((~start).sum())
     return out
 
 
@@ -131,10 +203,11 @@ def _closed_loop_job(job: tuple) -> dict:
     """프로세스 하나에서 닫힌 루프 한 에피소드 (정책은 프로세스마다 한 번만 불러옴)."""
     policy_path, ep_path, seed = job
     if policy_path not in _WORKER_POLICY:
-        import torch
-        torch.set_num_threads(1)
+        if policy_path not in RULES:
+            import torch
+            torch.set_num_threads(1)
         _WORKER_POLICY.clear()
-        _WORKER_POLICY[policy_path] = Policy(policy_path)
+        _WORKER_POLICY[policy_path] = load_policy(policy_path)
     _, scn, _ = load_episode(ep_path)
     r = closed_loop(_WORKER_POLICY[policy_path], scn, sensor_seed=seed)
     r['file'] = os.path.basename(ep_path)
@@ -152,16 +225,26 @@ def summarize(rows: list[dict]) -> dict:
         out[n + '_p95'] = float(np.mean([r[n + '_p95'] for r in rows]))
     for n in ('speed', 'weave_amp', 'weave_hz'):
         out[n + '_err'] = float(np.sqrt(np.mean([r[n + '_err'] ** 2 for r in rows])))
+    if all('n_start' in r for r in rows):
+        ss, sr = sum(r['height_sq_start'] for r in rows), sum(r['height_sq_rest'] for r in rows)
+        ns, nr = sum(r['n_start'] for r in rows), sum(r['n_rest'] for r in rows)
+        out['height_start'] = float(np.sqrt(ss / max(1, ns)))    # 시작 30 mm의 높이 RMS
+        out['height_rest'] = float(np.sqrt(sr / max(1, nr)))
+        out['height_start_share'] = float(ss / max(1e-12, ss + sr))   # 높이 제곱오차 중 시작 구간 몫
     return out
 
 
 def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',), verbose: bool = True,
-             jobs: int = 1) -> dict:
-    pol = Policy(policy_path)
+             jobs: int = 1, rule_dir: str = 'runs') -> dict:
+    """policy_path가 'rule' 또는 'rule-noprescan'이면 규칙 기준선을 평가하고 <rule_dir>/<이름>/eval.json에 쓴다."""
+    pol = load_policy(policy_path)
     fr = load_frames(data)
     eps = [i for i, s in enumerate(fr['ep_split']) if s in splits]
+    scenarios = ({e: load_episode(os.path.join(episodes, str(fr['ep_file'][e])))[1] for e in eps}
+                 if episodes and hasattr(pol, 'bind') else None)
     res = {'policy': policy_path, 'groups': pol.cfg['groups'], 'model': pol.cfg['model'],
-           'open_loop': open_loop(pol, fr, eps) if eps else {}}
+           'prescan': bool(pol.cfg.get('prescan', False)),
+           'open_loop': open_loop(pol, fr, eps, scenarios) if eps else {}}
     if episodes:
         per_kind: dict[str, list] = {}
         job_list = [(policy_path, os.path.join(episodes, str(fr['ep_file'][e])), 1000 + e) for e in eps]
@@ -175,7 +258,9 @@ def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',)
         res['closed_loop'] = {k: summarize(v) for k, v in per_kind.items()}
         res['closed_loop']['all'] = summarize([r for v in per_kind.values() for r in v])
         res['closed_loop_episodes'] = [r for v in per_kind.values() for r in v]
-    with open(os.path.join(os.path.dirname(policy_path), 'eval.json'), 'w', encoding='utf-8') as f:
+    out_dir = os.path.join(rule_dir, policy_path) if policy_path in RULES else os.path.dirname(policy_path)
+    os.makedirs(out_dir or '.', exist_ok=True)
+    with open(os.path.join(out_dir, 'eval.json'), 'w', encoding='utf-8') as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
     if verbose:
         report(res)
@@ -183,7 +268,8 @@ def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',)
 
 
 def report(res: dict) -> None:
-    print(f'\n정책 {res["policy"]} ({res["model"]}, 입력 {"+".join(res["groups"])})')
+    print(f'\n정책 {res["policy"]} ({res["model"]}, 입력 {"+".join(res["groups"])}, '
+          f'시작 구간 스캔 {"있음" if res.get("prescan") else "없음"})')
     if res['open_loop']:
         print('  열린 루프 RMSE (보정 0):  ' + '  '.join(
             f'{n} {v["rmse"]:.3f}' + (f' ({v["zero_rmse"]:.3f})' if v['zero_rmse'] is not None else '')
@@ -198,6 +284,10 @@ def report(res: dict) -> None:
                                                             if math.isfinite(v[n + '_gain']) else '(   - )')
                 for n in AXES)
                 + f'{v["speed_err"]:>9.2f}{v["weave_amp_err"]:>9.2f}')
+        a = res['closed_loop'].get('all', {})
+        if 'height_start' in a:
+            print(f'  높이 RMS: 시작 30 mm {a["height_start"]:.2f}, 나머지 {a["height_rest"]:.2f} mm '
+                  f'(제곱오차 중 시작 구간 {a["height_start_share"] * 100:.0f}%)')
 
 
 def main(argv=None):
@@ -207,14 +297,16 @@ def main(argv=None):
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('policies', nargs='+', help='train_bc.py가 만든 policy.pt')
+    ap.add_argument('policies', nargs='+',
+                    help="train_bc.py가 만든 policy.pt, 또는 규칙 기준선 'rule' (시작 구간 스캔 있음) / 'rule-noprescan'")
     ap.add_argument('--data', required=True, help='to_lerobot.py 출력 폴더')
     ap.add_argument('--episodes', help='에피소드 .npz 폴더 (닫힌 루프 평가용 시나리오)')
     ap.add_argument('--splits', default='test', help='평가할 나눔 (쉼표로, 예: test,val)')
     ap.add_argument('--jobs', type=int, default=1, help='닫힌 루프 병렬 프로세스 수')
+    ap.add_argument('--rule-dir', default='runs', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json)')
     args = ap.parse_args(argv)
     for p in args.policies:
-        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs)
+        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs, rule_dir=args.rule_dir)
 
 
 if __name__ == '__main__':

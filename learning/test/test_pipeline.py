@@ -136,3 +136,39 @@ def test_train_subsets_and_parallel_eval(small_batch, tmp_path):
     one = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False)
     two = evaluate(os.path.join(out, 'policy.pt'), data, str(ep_dir), verbose=False, jobs=2)
     assert one['closed_loop']['all'] == two['closed_loop']['all']
+
+
+def test_prescan_fills_start_zone(small_batch):
+    """용접 전 시작 구간 스캔: 단면이 토치 앞 30 mm만 재므로 스캔이 없으면 시작 구간 버퍼가 빈다."""
+    _, ep_dir = small_batch
+    rows, scn, _ = load_episode(str(ep_dir / 'mixed_0001.npz'))
+    assert scn['sensors']['prescan'] == pytest.approx(0.03)
+    s_pts, meas = PartErrorModel(scn).prescan(None)
+    assert s_pts[0] == 0 and s_pts[-1] * scn['geometry']['length'] == pytest.approx(0.03)
+    assert np.isfinite(meas).all()
+    k0 = 27 + int(np.flatnonzero(BUF_OFFSETS_MM == 0)[0])        # 토치 위치 점의 유효 표시 열
+    with_scan = episode_frames(rows, scn)[0]
+    without = episode_frames(rows, scn, prescan=False)[0]
+    assert with_scan[:5, k0].all() and not without[:5, k0].any()
+    assert np.array_equal(with_scan, episode_frames(rows, scn)[0])   # 스캔 노이즈는 시나리오마다 고정
+    off = copy.deepcopy(scn)
+    off['sensors']['prescan'] = 0.0
+    assert len(PartErrorModel(off).prescan(None)[0]) == 0
+
+
+def test_rule_baseline_and_start_zone(small_batch, tmp_path):
+    """규칙 기준선(torch 없이): 시작 구간 스캔이 있으면 시작 30 mm 높이 오차가 줄어든다."""
+    from learning.evaluate import evaluate
+    _, ep_dir = small_batch
+    data = str(tmp_path / 'data')
+    convert(str(ep_dir), data, lerobot=False)
+    scan = evaluate('rule', data, str(ep_dir), splits=('train', 'val', 'test'), verbose=False,
+                    rule_dir=str(tmp_path))
+    blind = evaluate('rule-noprescan', data, str(ep_dir), splits=('train', 'val', 'test'), verbose=False,
+                     rule_dir=str(tmp_path))
+    a, b = scan['closed_loop']['all'], blind['closed_loop']['all']
+    assert a['done'] == 1.0 and scan['prescan'] and not blind['prescan']
+    assert a['height_start'] < 0.5 * b['height_start']
+    assert a['height_gain'] > b['height_gain']
+    assert os.path.exists(tmp_path / 'rule' / 'eval.json')
+    assert set(scan['open_loop']) == set(ACTION_NAMES)
