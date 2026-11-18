@@ -148,8 +148,9 @@ def closed_loop(policy, scn: dict, sensor_seed: int = 0, dt: float = 0.01, fps: 
     look = scn['sensors']['laser_lookahead'] / model.L
     v_nom = ex['travel_speed_mm_s']
     buf = SectionBuffer(model.L)
-    if policy.cfg.get('prescan', False):
-        fill_prescan(buf, model, rng)
+    if policy.cfg.get('prescan', False) and not fill_prescan(buf, model, rng):
+        print('경고: 정책은 시작 구간 스캔으로 학습했는데 시나리오에 스캔 설정(sensors.prescan)이 없음 '
+              '(이전 시나리오면 sim_errors.resense로 지금 센서 설정을 넣으세요)', file=sys.stderr)
     if hasattr(policy, 'bind'):
         policy.bind(scn)
     so = np.array(epi.get('start_offset', [0.0] * 4))

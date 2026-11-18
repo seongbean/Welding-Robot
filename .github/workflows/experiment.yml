@@ -1,7 +1,8 @@
 name: Experiment (kinematic gen + BC train + eval)
 
 # 오래 걸리는 실험(운동학 사양 묶음 생성 → 변환 → MLP/GRU 학습 → 닫힌 루프 평가)을 GitHub에서 돌린다.
-# 브랜치에서 이 파일이나 learning/, sim_errors/를 바꿔 push하면 돌고, Actions 탭에서 손으로도 돌릴 수 있다.
+# Actions 탭의 "Run workflow"에서 브랜치를 골라 손으로 돌린다 (main에 병합된 뒤부터 보임).
+# 한 번에 러너 약 3시간분을 쓰므로 push마다 돌지 않게 했다.
 # 결과: 실행 요약(Summary)의 표, 그리고 eval-* 아티팩트(eval.json).
 # 지금 실험: 용접 전 시작 구간 스캔(prescan) 있음/없음 비교 (MLP, GRU, 규칙 기준선).
 
@@ -11,9 +12,6 @@ on:
       scale:
         description: '묶음 개수 배율 (1.0 = 사양 330개)'
         default: '1.0'
-  push:
-    branches: ['claude/**']
-    paths: ['.github/workflows/experiment.yml', 'learning/**', 'sim_errors/**']
 
 env:
   SCALE: ${{ github.event.inputs.scale || '1.0' }}
