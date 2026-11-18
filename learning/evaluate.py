@@ -13,6 +13,8 @@
    (좌우, 높이+가접, 작업각, 진행각). 기준선 = 보정 0 (추정 경로 그대로). 개선율 = 1 − 정책 RMS / 기준선 RMS.
    위빙·속도는 전문가 규칙값과의 차이로 본다.
 결과 표는 강도(혼합·단독·깨끗함·가혹)별로 나오고, <정책 폴더>/eval.json에 저장된다.
+닫힌 루프는 에피소드마다 오래 걸리므로(운동학 한 에피소드 수십 초) --jobs N으로 나눠 돌린다.
+보정 0 오차가 0인 강도(깨끗함의 각도 등)는 개선율 칸에 -를 쓴다.
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ import json
 import math
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
@@ -121,6 +124,23 @@ def closed_loop(policy: Policy, scn: dict, sensor_seed: int = 0, dt: float = 0.0
     return out
 
 
+_WORKER_POLICY: dict = {}
+
+
+def _closed_loop_job(job: tuple) -> dict:
+    """프로세스 하나에서 닫힌 루프 한 에피소드 (정책은 프로세스마다 한 번만 불러옴)."""
+    policy_path, ep_path, seed = job
+    if policy_path not in _WORKER_POLICY:
+        import torch
+        torch.set_num_threads(1)
+        _WORKER_POLICY.clear()
+        _WORKER_POLICY[policy_path] = Policy(policy_path)
+    _, scn, _ = load_episode(ep_path)
+    r = closed_loop(_WORKER_POLICY[policy_path], scn, sensor_seed=seed)
+    r['file'] = os.path.basename(ep_path)
+    return r
+
+
 def summarize(rows: list[dict]) -> dict:
     out = {'n': len(rows), 'done': float(np.mean([r['done'] for r in rows]))}
     for n in AXES:
@@ -135,7 +155,8 @@ def summarize(rows: list[dict]) -> dict:
     return out
 
 
-def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',), verbose: bool = True) -> dict:
+def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',), verbose: bool = True,
+             jobs: int = 1) -> dict:
     pol = Policy(policy_path)
     fr = load_frames(data)
     eps = [i for i, s in enumerate(fr['ep_split']) if s in splits]
@@ -143,10 +164,13 @@ def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',)
            'open_loop': open_loop(pol, fr, eps) if eps else {}}
     if episodes:
         per_kind: dict[str, list] = {}
-        for e in eps:
-            _, scn, _ = load_episode(os.path.join(episodes, str(fr['ep_file'][e])))
-            r = closed_loop(pol, scn, sensor_seed=1000 + e)
-            r['file'] = str(fr['ep_file'][e])
+        job_list = [(policy_path, os.path.join(episodes, str(fr['ep_file'][e])), 1000 + e) for e in eps]
+        if jobs > 1:
+            with ProcessPoolExecutor(jobs) as pool:
+                rows = list(pool.map(_closed_loop_job, job_list))
+        else:
+            rows = [_closed_loop_job(j) for j in job_list]
+        for e, r in zip(eps, rows):
             per_kind.setdefault(str(fr['ep_kind'][e]), []).append(r)
         res['closed_loop'] = {k: summarize(v) for k, v in per_kind.items()}
         res['closed_loop']['all'] = summarize([r for v in per_kind.values() for r in v])
@@ -170,7 +194,9 @@ def report(res: dict) -> None:
               + f'{"속도 차":>9}{"위빙 차":>9}')
         for k, v in res['closed_loop'].items():
             print(f'  {k:<8}{v["n"]:>4}{v["done"] * 100:>5.0f}%' + ''.join(
-                f'{v[n]:>8.2f} / {v[n + "_base"]:<5.2f}({v[n + "_gain"] * 100:+4.0f}%)' for n in AXES)
+                f'{v[n]:>8.2f} / {v[n + "_base"]:<5.2f}' + (f'({v[n + "_gain"] * 100:+4.0f}%)'
+                                                            if math.isfinite(v[n + '_gain']) else '(   - )')
+                for n in AXES)
                 + f'{v["speed_err"]:>9.2f}{v["weave_amp_err"]:>9.2f}')
 
 
@@ -185,9 +211,10 @@ def main(argv=None):
     ap.add_argument('--data', required=True, help='to_lerobot.py 출력 폴더')
     ap.add_argument('--episodes', help='에피소드 .npz 폴더 (닫힌 루프 평가용 시나리오)')
     ap.add_argument('--splits', default='test', help='평가할 나눔 (쉼표로, 예: test,val)')
+    ap.add_argument('--jobs', type=int, default=1, help='닫힌 루프 병렬 프로세스 수')
     args = ap.parse_args(argv)
     for p in args.policies:
-        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')))
+        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs)
 
 
 if __name__ == '__main__':

@@ -13,6 +13,8 @@
 - 손실: 행동 7개를 학습 세트 평균·표준편차로 정규화한 MSE.
 - MLP: 프레임 하나 → 행동. GRU: 길이 --seq (기본 20 = 2초) 구간을 펼쳐 학습하고, 실행 때는 은닉 상태를 이어 간다.
 - 검증 손실이 가장 낮은 가중치를 <out>/policy.pt로 저장 (정규화 값, 입력 묶음, 모델 설정 포함).
+- 수량·섭동 비교: --max-train N (학습 에피소드 N개만, 강도별 비율 유지, 같은 시드면 작은 N이 큰 N의 부분집합),
+  --no-perturb (섭동 에피소드를 학습에서 뺌). 고른 에피소드는 train_log.json의 train_files에 남는다.
 """
 from __future__ import annotations
 
@@ -118,6 +120,29 @@ def episodes_of(fr: dict, split: str) -> list[int]:
     return [i for i, s in enumerate(fr['ep_split']) if s == split]
 
 
+def pick_train(fr: dict, eps: list[int], max_train: int | None = None, no_perturb: bool = False,
+               seed: int = 0) -> list[int]:
+    """학습 에피소드 고르기. no_perturb면 섭동 에피소드를 빼고, max_train이면 강도별 비율을 유지해 N개만.
+
+    강도마다 섞은 뒤 (강도 안 순번 + 0.5) / 강도 개수 순으로 늘어놓고 앞에서 자르므로, 같은 시드에서는
+    작은 N의 선택이 큰 N의 선택에 포함된다 (수량 곡선용)."""
+    if no_perturb:
+        if 'ep_perturb' not in fr:
+            raise SystemExit('frames.npz에 섭동 표시가 없음: to_lerobot으로 다시 변환하세요.')
+        eps = [e for e in eps if not bool(fr['ep_perturb'][e])]
+    if max_train is None or max_train >= len(eps):
+        return list(eps)
+    rng = np.random.default_rng(seed)
+    kinds: dict[str, list[int]] = {}
+    for e in eps:
+        kinds.setdefault(str(fr['ep_kind'][e]), []).append(e)
+    order = []
+    for g in kinds.values():
+        g = list(rng.permutation(g))
+        order += [((k + 0.5) / len(g), rng.random(), int(e)) for k, e in enumerate(g)]
+    return sorted(e for _, _, e in sorted(order)[:max_train])
+
+
 def windows(fr: dict, eps: list[int], seq: int) -> tuple[np.ndarray, np.ndarray]:
     """에피소드를 seq 길이 구간으로 자름 (겹침 절반). 반환 (N, seq, n_obs), (N, seq, n_act)."""
     X, Y = [], []
@@ -133,13 +158,14 @@ def windows(fr: dict, eps: list[int], seq: int) -> tuple[np.ndarray, np.ndarray]
 
 def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
           epochs: int = 40, seq: int = 20, hidden: int | None = None, layers: int | None = None, lr: float = 1e-3,
-          batch: int = 256, seed: int = 0, verbose: bool = True) -> dict:
+          batch: int = 256, seed: int = 0, max_train: int | None = None, no_perturb: bool = False,
+          verbose: bool = True) -> dict:
     torch.manual_seed(seed)
     np.random.seed(seed)
     fr = load_frames(data)
     names = group_names(groups)
     idx = columns(fr['obs_names'], names)
-    tr, va = episodes_of(fr, 'train'), episodes_of(fr, 'val')
+    tr, va = pick_train(fr, episodes_of(fr, 'train'), max_train, no_perturb, seed), episodes_of(fr, 'val')
     if not tr:
         raise SystemExit('학습 에피소드가 없음')
     va = va or tr
@@ -190,7 +216,8 @@ def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
             print(f'epoch {ep + 1:3d}  학습 {tl / len(xt):.4f}  검증 {vl:.4f}  '
                   + ' '.join(f'{n} {v:.3f}' for n, v in zip(ACTION_NAMES, per)))
     res = {'cfg': cfg, 'best_val': best, 'history': hist, 'train_episodes': len(tr), 'val_episodes': len(va),
-           'train_samples': int(len(xt)), 'seconds': round(time.time() - t0, 1)}
+           'train_samples': int(len(xt)), 'seconds': round(time.time() - t0, 1),
+           'train_files': [str(fr['ep_file'][e]) for e in tr], 'max_train': max_train, 'no_perturb': no_perturb}
     with open(os.path.join(out, 'train_log.json'), 'w', encoding='utf-8') as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
     return res
@@ -213,9 +240,11 @@ def main(argv=None):
     ap.add_argument('--layers', type=int)
     ap.add_argument('--lr', type=float, default=1e-3)
     ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--max-train', type=int, help='학습 에피소드 N개만 (강도별 비율 유지)')
+    ap.add_argument('--no-perturb', action='store_true', help='섭동 에피소드를 학습에서 뺌')
     args = ap.parse_args(argv)
     r = train(args.data, args.out, args.model, args.obs.split(','), args.epochs, args.seq, args.hidden, args.layers,
-              args.lr, seed=args.seed)
+              args.lr, seed=args.seed, max_train=args.max_train, no_perturb=args.no_perturb)
     print(f'최저 검증 손실 {r["best_val"]:.4f} (정규화 MSE), 학습 에피소드 {r["train_episodes"]}개, '
           f'{r["seconds"]} s → {os.path.join(args.out, "policy.pt")}')
 
