@@ -14,7 +14,7 @@
    위빙·속도는 전문가 규칙값과의 차이로 본다.
 결과 표는 강도(혼합·단독·깨끗함·가혹)별로 나오고, <정책 폴더>/eval.json에 저장된다.
 닫힌 루프는 에피소드마다 오래 걸리므로(운동학 한 에피소드 수십 초) --jobs N으로 나눠 돌린다.
-보정 0 오차가 0인 강도(깨끗함의 각도 등)는 개선율 칸에 -를 쓴다.
+보정 0 오차가 0.01(mm 또는 deg)보다 작은 강도(깨끗함, 각도 오차가 없는 단독 오차)는 개선율 칸에 -를 쓴다.
 """
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def summarize(rows: list[dict]) -> dict:
         b = float(np.sqrt(np.mean([r[n + '_base'] ** 2 for r in rows])))
         out[n] = p
         out[n + '_base'] = b
-        out[n + '_gain'] = 1 - p / b if b > 1e-9 else float('nan')
+        out[n + '_gain'] = 1 - p / b if b >= 0.01 else float('nan')   # 고칠 오차가 거의 없으면 개선율은 의미 없음
         out[n + '_p95'] = float(np.mean([r[n + '_p95'] for r in rows]))
     for n in ('speed', 'weave_amp', 'weave_hz'):
         out[n + '_err'] = float(np.sqrt(np.mean([r[n + '_err'] ** 2 for r in rows])))
