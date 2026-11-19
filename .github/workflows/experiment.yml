@@ -5,7 +5,8 @@ name: Experiment (kinematic gen + BC train + eval)
 # 한 번에 러너 약 5시간분을 쓰므로 push마다 돌지 않게 했다.
 # 결과: 실행 요약(Summary)의 표, 그리고 eval-* 아티팩트(eval.json).
 # 지금 실험: 시편군 (T 필릿, ㄱ자 코너 필릿). 정책을 T만 / 코너만 / 둘 다로 학습하고 두 군 시험에서 본다
-#   (한 정책이 두 군을 덮는지, T 정책이 코너로 옮겨 가는지). 모두 용접 전 시작 구간 스캔 있음.
+#   (한 정책이 두 군을 덮는지, T 정책이 코너로 옮겨 가는지). mlp_both242 = 둘 다 섞되 학습 수 242 (수량 대조).
+#   모두 용접 전 시작 구간 스캔 있음.
 #   이전 실험(시작 구간 스캔 있음/없음)은 PR #21 때 이 파일의 git 기록에 있다.
 
 on:
@@ -71,6 +72,8 @@ jobs:
             python -m learning.train_bc data --model $m --family fillet_corner --out runs/${m}_corner
             python -m learning.train_bc data --model $m --out runs/${m}_both
           done
+          # 수량 대조: 둘 다 섞되 학습 수를 한 군과 같게(242). 섞인 효과와 수량 효과를 가른다
+          python -m learning.train_bc data --model mlp --max-train 242 --out runs/mlp_both242
       - uses: actions/upload-artifact@v4
         with:
           name: runs
@@ -84,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        policy: [mlp_t, mlp_corner, mlp_both, gru_t, gru_corner, gru_both, rule]
+        policy: [mlp_t, mlp_corner, mlp_both, mlp_both242, gru_t, gru_corner, gru_both, rule]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
