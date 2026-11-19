@@ -1,6 +1,4 @@
 """맞대기 V홈 시편군 (butt_v): config 덮어쓰기, 묶음 이름·난수, 개선 면 평면 맞춤 센서, 단차 오차, 모재 메시."""
-import math
-
 import numpy as np
 import pytest
 import yaml
@@ -85,8 +83,8 @@ def test_angle_errors_mean_what_the_config_says(butt):
                                                            rel=1e-6)
 
 
-def test_hi_lo_raises_root_and_biases_lateral(butt):
-    """단차 h: 정답 높이 = h/2. 개선 면 교선으로 재므로 좌우에 -h·tan(개선각)/2 치우침이 남는다 (알려진 한계)."""
+def test_hi_lo_raises_root_and_top_step_removes_lateral_bias(butt):
+    """단차 h: 정답 높이 = h/2. 개선 면 교선만 쓰면 좌우가 -h·tan(개선각)/2 밀리지만, 판 윗면 높이 차로 h를 재서 되돌린다."""
     scn = single_error(sample_scenario(butt, np.random.default_rng(5)), 'hi_lo')
     h = scn['shape']['hi_lo']
     for r in signature(scn):
@@ -94,7 +92,13 @@ def test_hi_lo_raises_root_and_biases_lateral(butt):
     m = PartErrorModel(scn)
     meas = m.section_fit(0.5, 0.0)
     assert meas[1] == pytest.approx(h / 2, abs=1e-6)
-    assert meas[0] == pytest.approx(-h * math.tan(scn['geometry']['bevel']) / 2, abs=1e-6)
+    assert abs(meas[0]) < 1e-6
+    z = m.seam_true(0.5, 0.0)[1][0][:, 2]
+    assert m._butt_top_step(np.array([0.5]), 0.0, z, 0.015, 0.001, 0.0, 0.0, None) == pytest.approx(h, abs=1e-9)
+    # 노이즈가 있어도 치우침 없이 (평균 0.02 mm 안)
+    rng = np.random.default_rng(0)
+    lat = [m.section_fit(0.5, 0.0, rng)[0] for _ in range(200)]
+    assert abs(np.nanmean(lat)) < 0.02 * MM
 
 
 def test_butt_mesh_root_edges_straddle_seam(butt):

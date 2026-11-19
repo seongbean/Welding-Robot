@@ -21,7 +21,7 @@ numpy만 쓴다. Isaac Sim 파이썬(isaac_opti3_receiver.py)과 conda 환경(ex
   이음매 좌표계 z = 두 개선 면 법선의 이등분(명목 = 위). 이름은 필릿 것을 그대로 쓰되 뜻을 바꿔 읽는다:
   web_lateral = 이음선 좌우 직진도, base_height = 판 높이 휨, heat.base_angle = 양쪽 판 각변형(같은 크기로 날개가 들림,
   이등분선은 그대로라 정답에 거의 영향 없음), heat.web_tilt = 좌우 판 각변형 차이(오른쪽 - 왼쪽, 작업각 = 절반),
-  shape.hi_lo = 단차(오른쪽 판이 왼쪽보다 높은 양, 맞대기만). 다층(채움 패스)의 목표 높이 변화는 다루지 않는다.
+  shape.hi_lo = 단차(오른쪽 판이 왼쪽보다 높은 양, 맞대기만. 단면 센서는 홈 양옆 판 윗면 높이 차로 재서 좌우를 고친다). 다층(채움 패스)의 목표 높이 변화는 다루지 않는다.
 단위: 내부 계산은 m, rad. config(yaml)는 mm, deg.
 """
 from __future__ import annotations
@@ -511,10 +511,37 @@ class PartErrorModel:
             # 두 개선 면의 교선(꼭짓점)은 틈새가 있으면 루트보다 아래에 있다: 잰 틈새와 잰 개선각으로 루트 높이로 올린다
             half = (math.pi - math.acos(float(np.clip(nb_f @ nw_f, -1.0, 1.0)))) / 2
             root = root + z * max(0.0, g) / 2 / max(1e-3, math.tan(half))
+            # 단차: 두 개선 면 교선은 단차 h만큼 옆으로 밀린다(-h·tan(개선각)/2). 홈 양옆 판 윗면 높이 차로 h를 재서 되돌린다
+            h_meas = self._butt_top_step(s_pts, s_arc, z, across, step, sig, drop, rng)
+            if h_meas is None:
+                return np.full(5, np.nan)
+            root = root + np.cross(z, d) * h_meas * math.tan(half) / 2
         e = R_e.T @ (root - p_e)
         rv = R_to_rotvec(R_e.T @ R_m)
         tack = float(self.tack_height([s_look])[0])
         return np.array([e[1], e[2] + tack, max(0.0, g), rv[0], rv[1]])
+
+    def _butt_top_step(self, s_pts, s_arc, z, across, step, sig, drop, rng):
+        """맞대기 단차 측정: 홈 양옆 판 윗면(홈 위 모서리에서 바깥으로 across)의 점 평균 높이 차 (오른쪽 - 왼쪽, z 방향).
+        각변형은 아크 뒤에서만 생기고 대칭 각변형은 양쪽이 같이 올라가므로, 토치 앞 측정에서는 거의 단차만 남는다."""
+        g = self.scn['geometry']
+        h = g['thickness'] - g['root_face']
+        a = h * math.tan(g['bevel'])
+        r = np.arange(step, across + 1e-9, step)
+        x = s_pts * self.L
+        tops = []
+        for pid, side in ((BASE, -1.0), (WEB, 1.0)):
+            X, R = np.meshgrid(x, r, indexing='ij')
+            pts = np.stack([X.ravel(), side * (a + R.ravel()), np.full(X.size, h)], axis=-1)
+            pts = self.deform_points(pts, np.full(len(pts), pid), s_arc)
+            if rng is not None:
+                pts = pts + rng.normal(scale=sig, size=pts.shape) if sig > 0 else pts
+                if drop > 0:
+                    pts = pts[rng.uniform(size=len(pts)) >= drop]
+            if len(pts) < 3:
+                return None
+            tops.append(pts.mean(axis=0))
+        return float((tops[1] - tops[0]) @ z)
 
     def _butt_face_points(self, P, tx, nL, nR, gap, across, step):
         """맞대기 두 개선 면 위의 점 (로봇 베이스 기준). 루트 끝에서 위로 면을 따라 across까지 (면 길이를 넘지 않음)."""
