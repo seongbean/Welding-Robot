@@ -172,3 +172,64 @@ def test_rule_baseline_and_start_zone(small_batch, tmp_path):
     assert a['height_gain'] > b['height_gain']
     assert os.path.exists(tmp_path / 'rule' / 'eval.json')
     assert set(scan['open_loop']) == set(ACTION_NAMES)
+
+
+@pytest.fixture(scope='module')
+def corner_batch(tmp_path_factory):
+    from sim_errors.part_errors import family_cfg
+    with open(DEFAULT_CFG, encoding='utf-8') as f:
+        cfg = family_cfg(yaml.safe_load(f), 'fillet_corner')
+    ep_dir = tmp_path_factory.mktemp('corner') / 'episodes'
+    ep_dir.mkdir()
+    for k, (name, scn) in enumerate(make_batch(cfg, {'clean': 1, 'single': 2, 'mixed': 10, 'hard': 1}, seed=7)):
+        scn = copy.deepcopy(scn)
+        scn['geometry']['length'] = 0.06
+        run_kinematic(scn, sensor_seed=k).save(str(ep_dir / name.replace('.json', '.npz')), scn)
+    return ep_dir
+
+
+def test_two_families_convert_and_evaluate(small_batch, corner_batch, tmp_path):
+    """T + 코너 에피소드 폴더를 한 데이터로 합치고, 시편군별로 나눠 평가 (규칙 기준선, torch 없이)."""
+    import json
+    from learning.evaluate import evaluate
+    from learning.report_evals import table
+    _, t_dir = small_batch
+    data = str(tmp_path / 'data')
+    r = convert([str(t_dir), str(corner_batch)], data, lerobot=False)
+    assert r['families'] == ['fillet_corner', 'fillet_t'] and r['episodes'] == 16 + 14
+    fr = np.load(os.path.join(data, 'frames.npz'))
+    assert set(fr['ep_family']) == {'fillet_t', 'fillet_corner'}
+    assert all(str(f).startswith('corner_') == (str(g) == 'fillet_corner')
+               for f, g in zip(fr['ep_file'], fr['ep_family']))
+    both = evaluate('rule', data, [str(t_dir), str(corner_batch)], splits=('train', 'val', 'test'), verbose=False,
+                    rule_dir=str(tmp_path))
+    assert {'fam_fillet_t', 'fam_fillet_corner'} <= set(both['closed_loop'])
+    n_corner = sum(str(g) == 'fillet_corner' for g in fr['ep_family'])
+    assert both['closed_loop']['fam_fillet_corner']['n'] == n_corner
+    one = evaluate('rule', data, [str(t_dir), str(corner_batch)], splits=('train', 'val', 'test'), verbose=False,
+                   rule_dir=str(tmp_path), families=['fillet_corner'], name='corner')
+    assert one['eval_families'] == ['fillet_corner'] and 'fam_fillet_t' not in one['closed_loop']
+    assert one['closed_loop']['all'] == both['closed_loop']['fam_fillet_corner']
+    assert os.path.exists(tmp_path / 'rule' / 'eval_corner.json')
+    md = table([str(tmp_path / 'rule' / 'eval.json'), str(tmp_path / 'rule' / 'eval_corner.json')])
+    assert 'rule/corner' in md and '→ 코너' in md
+    with open(tmp_path / 'rule' / 'eval_corner.json', encoding='utf-8') as f:
+        assert json.load(f)['closed_loop']['all']['done'] == 1.0
+    with pytest.raises(SystemExit):
+        convert([str(t_dir), str(t_dir)], str(tmp_path / 'dup'), lerobot=False)   # 이름이 겹치면 거부
+
+
+def test_train_on_one_family(small_batch, corner_batch, tmp_path):
+    pytest.importorskip('torch')
+    from learning.evaluate import evaluate
+    from learning.train_bc import train
+    _, t_dir = small_batch
+    data = str(tmp_path / 'data')
+    convert([str(t_dir), str(corner_batch)], data, lerobot=False)
+    out = str(tmp_path / 't_only')
+    res = train(data, out, epochs=1, verbose=False, families=['fillet_t'])
+    assert res['cfg']['families'] == ['fillet_t']
+    assert all(not f.startswith('corner_') for f in res['train_files'])
+    ev = evaluate(os.path.join(out, 'policy.pt'), data, [str(t_dir), str(corner_batch)], verbose=False,
+                  families=['fillet_corner'], name='corner')
+    assert ev['train_families'] == ['fillet_t'] and ev['eval_families'] == ['fillet_corner']

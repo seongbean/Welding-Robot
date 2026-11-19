@@ -9,7 +9,7 @@ from sim_errors.check_episode import FAIL, OK, check
 from sim_errors.episode import run_kinematic
 from sim_errors.expert import ScriptedExpert, apply_offset
 from sim_errors.make_scenarios import DEFAULT_CFG, make_batch
-from sim_errors.part_errors import MM, DEG, SINGLE_ERRORS, PartErrorModel, R_to_rotvec, scale_cfg, single_in_range
+from sim_errors.part_errors import MM, DEG, PartErrorModel, R_to_rotvec, scale_cfg, single_in_range, single_names
 
 
 @pytest.fixture(scope='module')
@@ -52,7 +52,7 @@ def test_batch_counts_modes_splits(cfg):
 
 def test_single_in_range_keeps_one_error(cfg):
     rng = np.random.default_rng(0)
-    for name in SINGLE_ERRORS:
+    for name in single_names(cfg):
         scn = single_in_range(cfg, name, rng)
         assert scn['single_error'] == name
         assert scn['sensors']['laser_noise'] > 0        # 센서 노이즈는 그대로

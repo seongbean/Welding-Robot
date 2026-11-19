@@ -4,6 +4,8 @@
 사용법 (저장소 루트에서)
   python -m learning.evaluate runs/mlp_full/policy.pt --data datasets/t_small --episodes episodes/t_small
   python -m learning.evaluate runs/*/policy.pt --data datasets/t_small --episodes episodes/t_small   # 여러 정책 비교
+  python -m learning.evaluate runs/mlp_t/policy.pt --data datasets/t_corner --episodes episodes/t episodes/corner \
+      --family fillet_corner --name corner        # T로 학습한 정책을 코너 시험에서 (→ runs/mlp_t/eval_corner.json)
 
 두 가지를 본다.
 1. 열린 루프: 시험 에피소드의 기록된 관측으로 행동을 예측해 전문가 정답과 비교 (행동별 RMSE, 보정 0과 비교).
@@ -15,6 +17,7 @@
 결과 표는 강도(혼합·단독·깨끗함·가혹)별로 나오고, <정책 폴더>/eval.json에 저장된다.
 닫힌 루프는 에피소드마다 오래 걸리므로(운동학 한 에피소드 수십 초) --jobs N으로 나눠 돌린다.
 정책 자리에 'rule'(또는 'rule-noprescan')을 주면 학습 없는 규칙 기준선(버퍼의 토치 위치 값을 그대로 씀)을 평가한다.
+시편군이 둘 이상 섞인 데이터는 강도별 표에 시편군별 줄(fam_<군>, fam_<군>_<강도>)을 더한다. --family로 한 군만 평가할 수 있다.
 높이 오차는 시작 30 mm와 나머지로도 나눠 보여 준다(시작 구간은 단면 센서가 토치 앞 30 mm만 재서 사각지대가 된다).
 보정 0 오차가 0.01(mm 또는 deg)보다 작은 강도(깨끗함, 각도 오차가 없는 단독 오차)는 개선율 칸에 -를 쓴다.
 """
@@ -235,20 +238,40 @@ def summarize(rows: list[dict]) -> dict:
     return out
 
 
-def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',), verbose: bool = True,
-             jobs: int = 1, rule_dir: str = 'runs') -> dict:
-    """policy_path가 'rule' 또는 'rule-noprescan'이면 규칙 기준선을 평가하고 <rule_dir>/<이름>/eval.json에 쓴다."""
+def _family(fr: dict, e: int) -> str:
+    return str(fr['ep_family'][e]) if 'ep_family' in fr else 'fillet_t'
+
+
+def _find(episodes, name: str) -> str:
+    """에피소드 폴더(하나 또는 여러 개)에서 파일 찾기."""
+    dirs = [episodes] if isinstance(episodes, str) else list(episodes)
+    for d in dirs:
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    raise SystemExit(f'에피소드 파일을 못 찾음: {name} (폴더: {", ".join(dirs)})')
+
+
+def evaluate(policy_path: str, data: str, episodes, splits=('test',), verbose: bool = True,
+             jobs: int = 1, rule_dir: str = 'runs', families=None, name: str | None = None) -> dict:
+    """policy_path가 'rule' 또는 'rule-noprescan'이면 규칙 기준선을 평가하고 <rule_dir>/<이름>/eval.json에 쓴다.
+    episodes: 에피소드 폴더 하나 또는 여러 개. families: 평가할 시편군 (None = 전부).
+    name을 주면 결과 파일이 eval_<name>.json (같은 정책을 여러 시험 묶음에서 볼 때)."""
     pol = load_policy(policy_path)
     fr = load_frames(data)
-    eps = [i for i, s in enumerate(fr['ep_split']) if s in splits]
-    scenarios = ({e: load_episode(os.path.join(episodes, str(fr['ep_file'][e])))[1] for e in eps}
+    eps = [i for i, s in enumerate(fr['ep_split']) if s in splits and (not families or _family(fr, i) in families)]
+    if families and not eps:
+        raise SystemExit(f'평가할 에피소드가 없음 (나눔 {",".join(splits)}, 시편군 {families or "전부"})')
+    scenarios = ({e: load_episode(_find(episodes, str(fr['ep_file'][e])))[1] for e in eps}
                  if episodes and hasattr(pol, 'bind') else None)
     res = {'policy': policy_path, 'groups': pol.cfg['groups'], 'model': pol.cfg['model'],
            'prescan': bool(pol.cfg.get('prescan', False)),
+           'train_families': pol.cfg.get('families', ['fillet_t']) if pol.cfg['model'] != 'rule' else [],
+           'eval_families': sorted({_family(fr, e) for e in eps}),
            'open_loop': open_loop(pol, fr, eps, scenarios) if eps else {}}
     if episodes:
         per_kind: dict[str, list] = {}
-        job_list = [(policy_path, os.path.join(episodes, str(fr['ep_file'][e])), 1000 + e) for e in eps]
+        job_list = [(policy_path, _find(episodes, str(fr['ep_file'][e])), 1000 + e) for e in eps]
         if jobs > 1:
             with ProcessPoolExecutor(jobs) as pool:
                 rows = list(pool.map(_closed_loop_job, job_list))
@@ -258,10 +281,17 @@ def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',)
             per_kind.setdefault(str(fr['ep_kind'][e]), []).append(r)
         res['closed_loop'] = {k: summarize(v) for k, v in per_kind.items()}
         res['closed_loop']['all'] = summarize([r for v in per_kind.values() for r in v])
+        if len(res['eval_families']) > 1:
+            for fam in res['eval_families']:
+                sel = [(e, r) for e, r in zip(eps, rows) if _family(fr, e) == fam]
+                res['closed_loop'][f'fam_{fam}'] = summarize([r for _, r in sel])
+                for kind in sorted({str(fr['ep_kind'][e]) for e, _ in sel}):   # 예: fam_fillet_corner_hard
+                    res['closed_loop'][f'fam_{fam}_{kind}'] = summarize(
+                        [r for e, r in sel if str(fr['ep_kind'][e]) == kind])
         res['closed_loop_episodes'] = [r for v in per_kind.values() for r in v]
     out_dir = os.path.join(rule_dir, policy_path) if policy_path in RULES else os.path.dirname(policy_path)
     os.makedirs(out_dir or '.', exist_ok=True)
-    with open(os.path.join(out_dir, 'eval.json'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(out_dir, f'eval_{name}.json' if name else 'eval.json'), 'w', encoding='utf-8') as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
     if verbose:
         report(res)
@@ -270,7 +300,8 @@ def evaluate(policy_path: str, data: str, episodes: str | None, splits=('test',)
 
 def report(res: dict) -> None:
     print(f'\n정책 {res["policy"]} ({res["model"]}, 입력 {"+".join(res["groups"])}, '
-          f'시작 구간 스캔 {"있음" if res.get("prescan") else "없음"})')
+          f'시작 구간 스캔 {"있음" if res.get("prescan") else "없음"}, '
+          f'학습 시편군 {"+".join(res.get("train_families") or ["-"])}, 시험 시편군 {"+".join(res.get("eval_families", []))})')
     if res['open_loop']:
         print('  열린 루프 RMSE (보정 0):  ' + '  '.join(
             f'{n} {v["rmse"]:.3f}' + (f' ({v["zero_rmse"]:.3f})' if v['zero_rmse'] is not None else '')
@@ -301,13 +332,16 @@ def main(argv=None):
     ap.add_argument('policies', nargs='+',
                     help="train_bc.py가 만든 policy.pt, 또는 규칙 기준선 'rule' (시작 구간 스캔 있음) / 'rule-noprescan'")
     ap.add_argument('--data', required=True, help='to_lerobot.py 출력 폴더')
-    ap.add_argument('--episodes', help='에피소드 .npz 폴더 (닫힌 루프 평가용 시나리오)')
+    ap.add_argument('--episodes', nargs='+', help='에피소드 .npz 폴더 (닫힌 루프 평가용 시나리오), 여러 개 가능')
+    ap.add_argument('--family', help='이 시편군 시험만 평가 (쉼표로 여러 개)')
+    ap.add_argument('--name', help='결과 파일 이름 eval_<name>.json (기본 eval.json)')
     ap.add_argument('--splits', default='test', help='평가할 나눔 (쉼표로, 예: test,val)')
     ap.add_argument('--jobs', type=int, default=1, help='닫힌 루프 병렬 프로세스 수')
     ap.add_argument('--rule-dir', default='runs', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json)')
     args = ap.parse_args(argv)
     for p in args.policies:
-        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs, rule_dir=args.rule_dir)
+        evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs, rule_dir=args.rule_dir,
+                 families=args.family.split(',') if args.family else None, name=args.name)
 
 
 if __name__ == '__main__':
