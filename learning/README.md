@@ -40,8 +40,19 @@ python -m learning.evaluate runs\mlp\policy.pt runs\mlp_noprofile\policy.pt runs
 
 Isaac 없이 전체 흐름만 볼 때는 두 번째 줄을 `--kinematic --jobs 4`(완벽 추종 가정)로 바꾼다.
 
+비교용 명령: 시작 구간 스캔 없이 변환(`--no-prescan`), 학습 없는 규칙 기준선(`rule`, `rule-noprescan`), eval.json 여러 개를 표 하나로(`report_evals`).
+
+```bat
+python -m learning.to_lerobot episodes\t_small --out datasets\t_small_noscan --no-prescan
+python -m learning.evaluate rule rule-noprescan --data datasets\t_small --episodes episodes\t_small --rule-dir runs
+python -m learning.report_evals runs\mlp\eval.json runs\rule\eval.json runs\rule-noprescan\eval.json
+```
+
+사양 수량(330개) 생성부터 평가까지는 GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)를 Run workflow로 돌린다. 약 30분, 러너 약 3시간분이라 push로는 돌지 않는다. 결과는 실행 요약의 표와 `eval-*` 아티팩트.
+
 - 나눔은 시나리오의 `episode.split`(에피소드 단위 학습 80 · 검증 10 · 시험 10, 가혹은 모두 시험).
-- 평가 결과는 `<정책 폴더>/eval.json`, 학습 곡선은 `train_log.json`.
+- 평가 결과는 `<정책 폴더>/eval.json`(규칙 기준선은 `<rule-dir>/rule/eval.json`), 학습 곡선은 `train_log.json`.
+- 높이 오차는 시작 30 mm와 나머지로도 나눠 나온다. 시작 구간 스캔으로 학습한 정책(`policy.pt`의 `prescan`)은 닫힌 루프에서도 스캔을 넣는다.
 - 닫힌 루프 평가는 로봇이 명령을 바로 따라간다고 가정한다. Isaac 추종 오차는 들어가지 않는다.
 
 ## 첫 한 바퀴 결과 (운동학 데이터, 2026-11-17)
@@ -105,7 +116,7 @@ python -m learning.evaluate runs\mlp_n048\policy.pt runs\mlp_noperturb\policy.pt
 | MLP, 섭동 뺌 | 156 | 0.066 (1) | 85% | 70% | 65% | 70% | 0.17 |
 | GRU | 242 (전체) | 0.035 (13) | 82% | 70% | 80% | 70% | 0.13 |
 
-- **수량:** 학습 에피소드를 5배로 늘려도 좌우·높이는 1~3%p만 좋아진다. 검증 손실은 120개에서 멈추고, MLP는 어느 수량에서나 1~2 epoch 뒤부터 과적합한다. 남은 오차는 데이터가 모자라서라기보다 단면에서 보이지 않는 부분(측정 뒤에 생기는 변형 등)으로 보인다(추정, 아직 확인하지 않음). 위빙 진폭은 수량에 따라 꾸준히 좋아진다.
+- **수량:** 학습 에피소드를 5배로 늘려도 좌우·높이는 1~3%p만 좋아진다. 검증 손실은 120개에서 멈추고, MLP는 어느 수량에서나 1~2 epoch 뒤부터 과적합한다. 남은 오차는 데이터가 모자라서가 아니었다. 대부분은 단면이 한 번도 보지 못한 이음매 시작 30 mm에서 나왔다(아래 "남은 높이 오차의 원인"). 위빙 진폭은 수량에 따라 꾸준히 좋아진다.
 - **섭동:** 같은 156개에서 섭동이 있든 없든 결과가 같다. 토치 자세를 입력에서 뺀 뒤로는 섭동이 정책 관측을 바꾸지 않기 때문이다. 단면 값은 추정 경로 기준이라 토치가 어디 있든 같고, 정책 출력은 진행 속도를 통해 진행도에만 영향을 준다. 같은 이유로 열린 루프와 닫힌 루프 오차가 거의 같다(MLP 전체: 좌우 0.212 대 0.21 mm). 섭동 뺌의 검증 손실이 높은 것은 혼합 에피소드 비율이 줄어서다.
 - **GRU:** 데이터가 많으면 과적합하지 않고(13 epoch에서 최저) 검증 손실이 가장 낮다. 작업각은 MLP보다 확실히 낫고(80% 대 66%) 나머지는 비슷하다.
 
