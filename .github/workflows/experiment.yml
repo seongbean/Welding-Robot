@@ -16,6 +16,10 @@ on:
       scale:
         description: '묶음 개수 배율 (1.0 = 시편군마다 사양 수량, T 330 · 코너 335 · V홈 335)'
         default: '1.0'
+      no_hilo:
+        description: '맞대기 단차를 끔 (대조 실험: 필릿 좌우가 나빠진 원인 확인)'
+        type: boolean
+        default: false
 
 env:
   SCALE: ${{ github.event.inputs.scale || '1.0' }}
@@ -37,7 +41,12 @@ jobs:
         run: |
           python -m sim_errors.make_scenarios --batch --scale "$SCALE" --out batch_all
           python -m sim_errors.make_scenarios --batch --scale "$SCALE" --family fillet_corner --out batch_all
-          python -m sim_errors.make_scenarios --batch --scale "$SCALE" --family butt_v --out batch_all
+          CFG=sim_errors/config/part_errors.yaml
+          if [ "${{ github.event.inputs.no_hilo }}" = "true" ]; then
+            python -c "import yaml; c = yaml.safe_load(open('$CFG', encoding='utf-8')); c['families']['butt_v']['pre_weld']['hi_lo_mm'] = 0; yaml.safe_dump(c, open('cfg_nohilo.yaml', 'w', encoding='utf-8'), allow_unicode=True)"
+            CFG=cfg_nohilo.yaml
+          fi
+          python -m sim_errors.make_scenarios --config "$CFG" --batch --scale "$SCALE" --family butt_v --out batch_all
           mkdir -p batch
           ls batch_all/*.json | sort | awk -v n="$SHARDS" -v k=${{ matrix.shard }} 'NR % n == k' | xargs -I{} cp {} batch/
           ls batch | wc -l
