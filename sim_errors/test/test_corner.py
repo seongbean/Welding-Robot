@@ -29,7 +29,7 @@ def test_family_cfg_overrides_only_listed_keys(raw, corner):
     assert corner['pre_weld']['icp_xyz_mm'] == t['pre_weld']['icp_xyz_mm']       # 공통값은 그대로
     assert corner['expert'] == t['expert'] and corner['sensors'] == t['sensors']
     with pytest.raises(ValueError):
-        family_cfg(raw, 'butt_v')
+        family_cfg(raw, 'pipe_girth')
 
 
 def test_batch_names_and_draws_differ_from_t(raw, corner):

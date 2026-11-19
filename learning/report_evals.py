@@ -16,7 +16,7 @@ import sys
 AXES = ('lateral', 'height', 'work', 'travel')
 
 
-SHORT = {'fillet_t': 'T', 'fillet_corner': '코너'}
+SHORT = {'fillet_t': 'T', 'fillet_corner': '코너', 'butt_v': 'V홈'}
 
 
 def short(fam: str) -> str:

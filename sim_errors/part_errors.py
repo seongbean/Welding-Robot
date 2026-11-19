@@ -15,6 +15,13 @@ numpy만 쓴다. Isaac Sim 파이썬(isaac_opti3_receiver.py)과 conda 환경(ex
 - fillet_corner: ㄱ자 코너 필릿. 웹이 바닥 판 끝 위에 바깥 면을 맞춰 선다. 바닥 판은 토치 쪽으로만 뻗는다
   (base_width = 토치 쪽 날개 폭, 웹 밑은 웹 두께만큼). 안쪽 모서리 필릿이라 이음매·정답·단면 센서 식은 T와 같고,
   다른 것은 모재 모양과 오차 범위(config families.fillet_corner)다.
+- butt_v: 맞대기 V홈 (아래보기 1G, 루트 패스). 두 판이 홈을 사이에 두고 같은 평면에 눕는다.
+  모재 좌표계: 원점 = 루트 가운데(루트 면 윗높이), x = 이음매, y = 오른쪽 판 쪽, z = 위 (판 윗면 z = 두께 - 루트 면).
+  BASE = 왼쪽 판(-y), WEB = 오른쪽 판(+y). 홈 벽(개선 면)은 연직에서 bevel만큼 벌어지고, 루트 틈새는 두 루트 끝 사이.
+  이음매 좌표계 z = 두 개선 면 법선의 이등분(명목 = 위). 이름은 필릿 것을 그대로 쓰되 뜻을 바꿔 읽는다:
+  web_lateral = 이음선 좌우 직진도, base_height = 판 높이 휨, heat.base_angle = 양쪽 판 각변형(같은 크기로 날개가 들림,
+  이등분선은 그대로라 정답에 거의 영향 없음), heat.web_tilt = 좌우 판 각변형 차이(오른쪽 - 왼쪽, 작업각 = 절반),
+  shape.hi_lo = 단차(오른쪽 판이 왼쪽보다 높은 양, 맞대기만). 다층(채움 패스)의 목표 높이 변화는 다루지 않는다.
 단위: 내부 계산은 m, rad. config(yaml)는 mm, deg.
 """
 from __future__ import annotations
@@ -27,7 +34,7 @@ import numpy as np
 
 BASE, WEB = 0, 1
 SCHEMA_VERSION = 1
-JOINTS = ('fillet_t', 'fillet_corner')   # 지원하는 시편군 (geometry.joint)
+JOINTS = ('fillet_t', 'fillet_corner', 'butt_v')   # 지원하는 시편군 (geometry.joint)
 
 
 # ----------------------------------------------------------------------------- 회전 유틸
@@ -104,6 +111,11 @@ R_SEAM_NOM = np.array([[1.0, 0.0, 0.0],
                        [0.0, 1 / math.sqrt(2), 1 / math.sqrt(2)]])
 
 
+def seam_nominal_R(joint: str) -> np.ndarray:
+    """명목 이음매 좌표계 (모재 좌표계 기준). 맞대기 V홈은 z = 위, y = 오른쪽 판 쪽이라 단위 행렬."""
+    return np.eye(3) if joint == 'butt_v' else R_SEAM_NOM
+
+
 # ----------------------------------------------------------------------------- 샘플링
 def _uni(rng, spec) -> float:
     """[lo, hi] → 균등, 숫자 하나 → ±값 대칭 균등."""
@@ -154,11 +166,7 @@ def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None
         'version': SCHEMA_VERSION,
         'seed': seed,
         'pass_index': 0,
-        'geometry': {
-            'joint': joint, 'length': L,
-            'base_width': g['base_width_mm'] * MM, 'base_thickness': g['base_thickness_mm'] * MM,
-            'web_height': g['web_height_mm'] * MM, 'web_thickness': g['web_thickness_mm'] * MM,
-        },
+        'geometry': _geometry(g, joint, L),
         'T_nominal': make_T(rpy_to_R(np.array(nom['rpy_deg']) * DEG),
                             np.array(nom['xyz_mm']) * MM).tolist(),
         'place': {'xyz': [_uni(rng, pre['place_xyz_mm']) * MM for _ in range(3)],
@@ -197,7 +205,18 @@ def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None
     # (맨 끝에 뽑아서 설정 없는 T 필릿의 난수 순서는 그대로)
     if pre.get('web_square_deg', 0):
         scn['shape']['web_square'] = _uni(rng, pre['web_square_deg']) * DEG
+    if pre.get('hi_lo_mm', 0):          # 단차 (맞대기만)
+        scn['shape']['hi_lo'] = _uni(rng, pre['hi_lo_mm']) * MM
     return scn
+
+
+def _geometry(g: dict, joint: str, L: float) -> dict:
+    if joint == 'butt_v':
+        return {'joint': joint, 'length': L, 'plate_width': g['plate_width_mm'] * MM,
+                'thickness': g['thickness_mm'] * MM, 'bevel': g['bevel_deg'] * DEG, 'root_face': g['root_face_mm'] * MM}
+    return {'joint': joint, 'length': L,
+            'base_width': g['base_width_mm'] * MM, 'base_thickness': g['base_thickness_mm'] * MM,
+            'web_height': g['web_height_mm'] * MM, 'web_thickness': g['web_thickness_mm'] * MM}
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -216,7 +235,10 @@ def family_cfg(cfg: dict, family: str | None = None) -> dict:
         return out
     if family not in fams:
         raise ValueError(f'config에 시편군 {family}가 없음 (있는 것: {", ".join([out["geometry"]["joint"], *fams])})')
+    geom = copy.deepcopy(fams[family].get('geometry', {}))
     out = _merge(out, fams[family])
+    if 'plate_width_mm' in geom:            # 모양이 다른 이음(맞대기): 필릿 치수를 섞지 않는다
+        out['geometry'] = geom
     out['geometry']['joint'] = family
     return out
 
@@ -271,6 +293,9 @@ class PartErrorModel:
     def __init__(self, scn: dict):
         self.scn = scn
         self.L = scn['geometry']['length']
+        self.joint = scn['geometry'].get('joint', 'fillet_t')
+        self.butt = self.joint == 'butt_v'
+        self.R_nom = seam_nominal_R(self.joint)
         self.set_nominal(np.array(scn['T_nominal']))
 
     def set_nominal(self, T_nominal) -> None:
@@ -315,6 +340,14 @@ class PartErrorModel:
         return (self.scn['shape'].get('web_square', 0.0) + self.scn['prior']['web_tilt']
                 + self.scn['heat']['web_tilt'] * self._heat_profile(s, s_arc))
 
+    def plate_angles(self, s, s_arc):
+        """맞대기: (왼쪽 판, 오른쪽 판) 각변형 [rad], 날개가 들리는 쪽이 +. 양쪽 = base_angle, 차이 = web_tilt."""
+        th, d = self.base_angle(s, s_arc), self.web_tilt(s, s_arc)
+        return th - d / 2, th + d / 2
+
+    def hi_lo(self) -> float:
+        return float(self.scn['shape'].get('hi_lo', 0.0))
+
     def slip(self, s_arc) -> np.ndarray:
         sl = self.scn['slip']
         r = np.clip((s_arc - sl['drift_s0']) / sl['drift_span'], 0.0, 1.0)
@@ -332,7 +365,22 @@ class PartErrorModel:
     def _seam_part(self, s, s_arc):
         """실제 이음매 점 (모재 좌표계, 밀림 포함). 각변형은 이음매 선을 축으로 돌므로 점은 그대로."""
         s = np.atleast_1d(np.asarray(s, dtype=float))
-        return np.stack([s * self.L, self.web_lateral(s), self.base_height(s, s_arc)], axis=-1) + self.slip(s_arc)
+        z = self.base_height(s, s_arc) + (self.hi_lo() / 2 if self.butt else 0.0)   # 맞대기: 두 루트 끝의 가운데
+        return np.stack([s * self.L, self.web_lateral(s), z], axis=-1) + self.slip(s_arc)
+
+    def _face_normals(self, s, s_arc):
+        """두 판 용접 면 법선 (모재 좌표계, 홈/이음매 쪽을 향함). 필릿: 바닥 판 윗면, 웹 용접 쪽 면.
+        맞대기: 왼쪽·오른쪽 개선 면 (각변형으로 날개가 들리면 면이 연직 쪽으로 선다)."""
+        if self.butt:
+            b = self.scn['geometry']['bevel']
+            aL, aR = self.plate_angles(s, s_arc)
+            aL, aR = b - aL, b - aR
+            z0 = np.zeros_like(aL)
+            return (np.stack([z0, np.cos(aL), np.sin(aL)], axis=-1),
+                    np.stack([z0, -np.cos(aR), np.sin(aR)], axis=-1))
+        th, ps = self.base_angle(s, s_arc), self.web_tilt(s, s_arc)
+        return (np.stack([np.zeros_like(th), np.sin(th), np.cos(th)], axis=-1),
+                np.stack([np.zeros_like(ps), -np.cos(ps), -np.sin(ps)], axis=-1))
 
     def _seam_geom(self, s, s_arc):
         """실제 이음매 점, 이음매 좌표계, 바닥 판 면 법선, 웹 판 용접 쪽 면 법선 (모두 로봇 베이스 기준)."""
@@ -340,9 +388,7 @@ class PartErrorModel:
         h = 1e-3
         P = self._seam_part(s, s_arc)
         tx = _normalize(self._seam_part(s + h, s_arc) - self._seam_part(s - h, s_arc))
-        th, ps = self.base_angle(s, s_arc), self.web_tilt(s, s_arc)
-        n_base = np.stack([np.zeros_like(th), np.sin(th), np.cos(th)], axis=-1)
-        n_web = np.stack([np.zeros_like(ps), -np.cos(ps), -np.sin(ps)], axis=-1)
+        n_base, n_web = self._face_normals(s, s_arc)
         b = n_base + n_web
         z = _normalize(b - np.sum(b * tx, axis=-1, keepdims=True) * tx)
         y = np.cross(z, tx)
@@ -359,7 +405,7 @@ class PartErrorModel:
         s = np.atleast_1d(np.asarray(s, dtype=float))
         P = np.stack([s * self.L, np.zeros_like(s), np.zeros_like(s)], axis=-1)
         Rw, tw = self.T_est[:3, :3], self.T_est[:3, 3]
-        return P @ Rw.T + tw, np.broadcast_to(Rw @ R_SEAM_NOM, (len(s), 3, 3)).copy()
+        return P @ Rw.T + tw, np.broadcast_to(Rw @ self.R_nom, (len(s), 3, 3)).copy()
 
     def label(self, s: float, s_arc: float) -> dict:
         """진행도 s에서의 정답: 추정 경로 좌표계 기준 위치·각도 보정, 틈새, 가접 높이."""
@@ -420,12 +466,15 @@ class PartErrorModel:
         s_pts = np.clip(s_look + a / self.L, 0.0, 1.0)
         P, R, nb, nw = self._seam_geom(s_pts, s_arc)
         tx = R[:, :, 0]
-        ub = _normalize(np.cross(tx, nb))        # 바닥 판 면 위, 토치 쪽으로
-        uw = _normalize(np.cross(nw, tx))        # 웹 판 면 위, 위로
         gap = float(self.gap(np.array([s_look]), s_arc)[0])
-        r = np.arange(step, across + 1e-9, step)
-        base = (P[:, None, :] + ub[:, None, :] * r[None, :, None]).reshape(-1, 3)
-        web = (P[:, None, :] + uw[:, None, :] * (gap + r)[None, :, None]).reshape(-1, 3)   # 틈새 위로만 보임
+        if self.butt:
+            base, web = self._butt_face_points(P, tx, nb, nw, gap, across, step)
+        else:
+            ub = _normalize(np.cross(tx, nb))        # 바닥 판 면 위, 토치 쪽으로
+            uw = _normalize(np.cross(nw, tx))        # 웹 판 면 위, 위로
+            r = np.arange(step, across + 1e-9, step)
+            base = (P[:, None, :] + ub[:, None, :] * r[None, :, None]).reshape(-1, 3)
+            web = (P[:, None, :] + uw[:, None, :] * (gap + r)[None, :, None]).reshape(-1, 3)   # 틈새 위로만 보임
         planes = []
         for pts in (base, web):
             if rng is not None:
@@ -438,9 +487,9 @@ class PartErrorModel:
             n = np.linalg.svd(pts - c, full_matrices=False)[2][-1]
             planes.append((c, n))
         (cb, nb_f), (cw, nw_f) = planes
-        # 법선 방향은 추정 모재 좌표계로 정함 (로봇이 아는 값): 바닥 판 +z, 웹 판 -y
+        # 법선 방향은 추정 모재 좌표계로 정함 (로봇이 아는 값): 필릿 바닥 판 +z, 웹 판 -y / 맞대기 왼쪽 +y, 오른쪽 -y
         Re_part = self.T_est[:3, :3]
-        if nb_f @ Re_part[:, 2] < 0:
+        if nb_f @ (Re_part[:, 1] if self.butt else Re_part[:, 2]) < 0:
             nb_f = -nb_f
         if nw_f @ -Re_part[:, 1] < 0:
             nw_f = -nw_f
@@ -457,17 +506,38 @@ class PartErrorModel:
         z = bis - (bis @ d) * d
         z /= np.linalg.norm(z)
         R_m = np.stack([d, np.cross(z, d), z], axis=-1)
+        g = gap + (rng.normal(scale=se['laser_noise']) if rng is not None else 0.0)
+        if self.butt:
+            # 두 개선 면의 교선(꼭짓점)은 틈새가 있으면 루트보다 아래에 있다: 잰 틈새와 잰 개선각으로 루트 높이로 올린다
+            half = (math.pi - math.acos(float(np.clip(nb_f @ nw_f, -1.0, 1.0)))) / 2
+            root = root + z * max(0.0, g) / 2 / max(1e-3, math.tan(half))
         e = R_e.T @ (root - p_e)
         rv = R_to_rotvec(R_e.T @ R_m)
         tack = float(self.tack_height([s_look])[0])
-        g = gap + (rng.normal(scale=se['laser_noise']) if rng is not None else 0.0)
         return np.array([e[1], e[2] + tack, max(0.0, g), rv[0], rv[1]])
+
+    def _butt_face_points(self, P, tx, nL, nR, gap, across, step):
+        """맞대기 두 개선 면 위의 점 (로봇 베이스 기준). 루트 끝에서 위로 면을 따라 across까지 (면 길이를 넘지 않음)."""
+        g = self.scn['geometry']
+        Rw = self.T_place[:3, :3]
+        y, z = Rw[:, 1], Rw[:, 2]
+        face = (g['thickness'] - g['root_face']) / math.cos(g['bevel'])
+        r = np.arange(step, min(across, face) + 1e-9, step)
+        out = []
+        for n, side in ((nL, -1.0), (nR, 1.0)):            # 법선은 이미 로봇 베이스 기준
+            u = _normalize(np.cross(tx, n))
+            u = np.where(np.sum(u * z, axis=-1, keepdims=True) < 0, -u, u)       # 면을 따라 위로
+            edge = P + y * side * gap / 2 + z * side * self.hi_lo() / 2              # 그 판의 루트 끝
+            out.append((edge[:, None, :] + u[:, None, :] * r[None, :, None]).reshape(-1, 3))
+        return out
 
     # --- 모재 메시 변형 (Isaac Sim 표시용)
     def deform_points(self, P, plate, s_arc) -> np.ndarray:
         """명목 모재 꼭짓점 (n,3, 모재 좌표계) → 변형된 꼭짓점 (로봇 베이스 기준)."""
         P = np.asarray(P, dtype=float)
         plate = np.asarray(plate)
+        if self.butt:
+            return self._deform_butt(P, plate, s_arc)
         s = np.clip(P[:, 0] / self.L, 0.0, 1.0)
         out = P.copy()
         dy = self.web_lateral(s)
@@ -486,16 +556,40 @@ class PartErrorModel:
         Rw, tw = self.T_place[:3, :3], self.T_place[:3, 3]
         return out @ Rw.T + tw
 
+    def _deform_butt(self, P, plate, s_arc) -> np.ndarray:
+        """맞대기: 판마다 틈새 절반만큼 벌리고(오른쪽은 단차만큼 올림) 자기 루트 끝을 축으로 각변형, 그다음 좌우·높이·밀림."""
+        s = np.clip(P[:, 0] / self.L, 0.0, 1.0)
+        out = P.copy()
+        gap = self.gap(s, s_arc)
+        aL, aR = self.plate_angles(s, s_arc)
+        for pid, side, ang in ((BASE, -1.0, -aL), (WEB, 1.0, aR)):
+            m = plate == pid
+            ey, ez = side * gap[m] / 2, (self.hi_lo() if side > 0 else 0.0)
+            yr, zr, a = out[m, 1], out[m, 2], np.broadcast_to(ang, s.shape)[m]
+            out[m, 1] = ey + yr * np.cos(a) - zr * np.sin(a)
+            out[m, 2] = ez + yr * np.sin(a) + zr * np.cos(a)
+        out[:, 1] += self.web_lateral(s)
+        out[:, 2] += self.base_height(s, s_arc)
+        out += self.slip(s_arc)
+        Rw, tw = self.T_place[:3, :3], self.T_place[:3, 3]
+        return out @ Rw.T + tw
+
     def nominal_meshes(self, nx: int = 60):
         """바닥 판·웹 판의 명목 메시. 반환: (꼭짓점 (n,3), 판 번호 (n,), 면 꼭짓점 수, 면 인덱스)."""
         g = self.scn['geometry']
-        W, tb, H, tw = g['base_width'], g['base_thickness'], g['web_height'], g['web_thickness']
-        # 단면 (y, z) 다각형. 바닥 판은 y=0에 꼭짓점을 둬서 각변형 꺾임이 생기게 함
-        if g.get('joint', 'fillet_t') == 'fillet_corner':   # ㄱ자: 바닥 판은 토치 쪽 날개 + 웹 밑까지
-            base = [(-W, -tb), (0, -tb), (tw, -tb), (tw, 0), (0, 0), (-W, 0)]
+        if self.butt:   # 맞대기 V홈: 왼쪽·오른쪽 판, 루트 끝 (0, 0)에 꼭짓점 (틈새는 deform_points에서 벌림)
+            W, f, h = g['plate_width'], g['root_face'], g['thickness'] - g['root_face']
+            a = h * math.tan(g['bevel'])
+            sections = [(BASE, [(-W, -f), (0, -f), (0, 0), (-a, h), (-W, h)]),
+                        (WEB, [(0, -f), (W, -f), (W, h), (a, h), (0, 0)])]
         else:
-            base = [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]
-        sections = [(BASE, base), (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])]
+            W, tb, H, tw = g['base_width'], g['base_thickness'], g['web_height'], g['web_thickness']
+            # 단면 (y, z) 다각형. 바닥 판은 y=0에 꼭짓점을 둬서 각변형 꺾임이 생기게 함
+            if g.get('joint', 'fillet_t') == 'fillet_corner':   # ㄱ자: 바닥 판은 토치 쪽 날개 + 웹 밑까지
+                base = [(-W, -tb), (0, -tb), (tw, -tb), (tw, 0), (0, 0), (-W, 0)]
+            else:
+                base = [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]
+            sections = [(BASE, base), (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])]
         pts, plate, counts, idx = [], [], [], []
         xs = np.linspace(0.0, self.L, nx + 1)
         for pid, sec in sections:
@@ -524,8 +618,9 @@ def zero_errors(scn: dict) -> dict:
     for k in ('web_bow', 'web_wave', 'base_bow', 'base_wave', 'gap0', 'gap1'):
         z['shape'][k] = 0.0
     z['shape']['tacks'] = []
-    if 'web_square' in z['shape']:
-        z['shape']['web_square'] = 0.0
+    for k in ('web_square', 'hi_lo'):
+        if k in z['shape']:
+            z['shape'][k] = 0.0
     z['slip'].update(drift=[0.0, 0.0, 0.0], jump=[0.0, 0.0, 0.0])
     z['heat'].update(base_angle=0.0, web_tilt=0.0, bow=0.0, gap_close=0.0)
     z['prior'] = {'base_angle': 0.0, 'web_tilt': 0.0, 'bow': 0.0}
@@ -548,6 +643,7 @@ SINGLE_ERRORS = {
     'bow': ('세로 휨', {'heat': {'bow': 5 * MM}}),
     'gap_close': ('틈새 닫힘', {'shape': {'gap0': 2 * MM, 'gap1': 2 * MM}, 'heat': {'gap_close': 1.5 * MM}}),
     'web_square': ('웹 직각도 (코너 필릿)', {'shape': {'web_square': 3 * DEG}}),
+    'hi_lo': ('단차 (맞대기)', {'shape': {'hi_lo': 2 * MM}}),
     'residual': ('잔류 변형 (다음 패스)', {'prior': {'base_angle': 3 * DEG, 'web_tilt': 2 * DEG, 'bow': 3 * MM},
                                        'pass_index': 1}),
 }
@@ -612,21 +708,24 @@ _SINGLE_KEEP = {
     'bow': [('heat', 'bow')],
     'gap_close': [('shape', 'gap0'), ('shape', 'gap1'), ('heat', 'gap_close')],
     'web_square': [('shape', 'web_square')],
+    'hi_lo': [('shape', 'hi_lo')],
 }
 
 # 설정에 범위가 있어야 쓰는 단독 오차 (그 시편군에만 있는 오차)
-_SINGLE_NEEDS = {'web_square': ('pre_weld', 'web_square_deg')}
+_SINGLE_NEEDS = {'web_square': ('pre_weld', 'web_square_deg'), 'hi_lo': ('pre_weld', 'hi_lo_mm')}
 
 
 def single_names(cfg: dict) -> list[str]:
-    """이 config(시편군)에서 쓸 단독 오차 이름 (SINGLE_ERRORS 순서). T 필릿은 13종, 코너 필릿은 웹 직각도를 더해 14종."""
+    """이 config(시편군)에서 쓸 단독 오차 이름 (SINGLE_ERRORS 순서). T 필릿은 13종, 코너 필릿은 웹 직각도를 더해 14종,
+    맞대기 V홈은 단차를 더해 14종."""
     return [n for n in SINGLE_ERRORS
             if n not in _SINGLE_NEEDS or cfg.get(_SINGLE_NEEDS[n][0], {}).get(_SINGLE_NEEDS[n][1], 0)]
 
 # 가혹 묶음에서 크기를 키울 범위 (개수·확률·주기·구간 길이는 그대로)
 _SCALE_KEYS = {
     'pre_weld': ('place_xyz_mm', 'place_rpy_deg', 'icp_xyz_mm', 'icp_rot_deg', 'web_bow_mm_per_m', 'web_wave_mm',
-                 'base_bow_mm_per_m', 'base_wave_mm', 'gap_mm', 'gap_taper_mm', 'tack_height_mm', 'web_square_deg'),
+                 'base_bow_mm_per_m', 'base_wave_mm', 'gap_mm', 'gap_taper_mm', 'tack_height_mm', 'web_square_deg',
+                 'hi_lo_mm'),
     'in_weld': ('drift_mm', 'jump_mm', 'base_angle_deg', 'web_tilt_deg', 'bow_mm', 'gap_close_mm'),
 }
 
