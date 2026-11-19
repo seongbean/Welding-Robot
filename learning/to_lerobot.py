@@ -7,6 +7,8 @@
 
 - 관측·행동 정의는 learning/features.py (관측 61개, 행동 7개).
 - 묶음 실행 보고서(<에피소드 폴더>/batch_report.json)가 있으면 점검에 실패한 에피소드는 뺀다.
+- 시나리오에 시작 구간 스캔(sensors.prescan, 아크 끄고 시작 30 mm)이 있으면 그 측정으로 단면 버퍼를 먼저 채운다.
+  --no-prescan이면 넣지 않는다. 이전 기록은 sim_errors.resense로 지금 센서 설정을 넣어야 스캔이 생긴다.
 - 학습·검증·시험 나눔은 시나리오의 episode.split (에피소드 단위). 가혹 묶음은 시험(평가 전용).
 - frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode, perturb.
   학습(learning/train_bc.py)은 이 파일을 읽는다.
@@ -37,13 +39,14 @@ def failed_episodes(ep_dir: str) -> dict[str, str]:
     return {e['file']: e.get('reason', '') for e in rep.get('episodes', []) if not e.get('ok', False)}
 
 
-def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS) -> dict:
+def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS, prescan: bool = True) -> dict:
     files = sorted(f for f in glob.glob(os.path.join(ep_dir, '*.npz')) if not f.endswith('.failed.npz'))
     bad = failed_episodes(ep_dir)
     os.makedirs(out, exist_ok=True)
     OB, A, E, F, T = [], [], [], [], []
     info = {'file': [], 'split': [], 'kind': [], 'mode': [], 'perturb': [], 'n': []}
     skipped = []
+    used_prescan = False
     for path in files:
         name = os.path.basename(path)
         if name in bad:
@@ -53,7 +56,8 @@ def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS) -> dict
         if not rows['arc_on'].any() or not bool(rows['done'][-1]):
             skipped.append((name, '용접 구간이 끝나지 않음'))
             continue
-        obs, act, ts = episode_frames(rows, scn, fps)
+        obs, act, ts = episode_frames(rows, scn, fps, prescan)
+        used_prescan = used_prescan or (prescan and scn['sensors'].get('prescan', 0.0) > 0)
         k = len(info['file'])
         epi = scn.get('episode', {})
         OB.append(obs)
@@ -72,12 +76,12 @@ def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS) -> dict
     np.savez_compressed(os.path.join(out, 'frames.npz'), obs=np.concatenate(OB), action=np.concatenate(A),
                         episode_index=np.concatenate(E), frame_index=np.concatenate(F), timestamp=np.concatenate(T),
                         obs_names=np.array(OBS_NAMES), action_names=np.array(ACTION_NAMES),
-                        **{f'ep_{k}': np.array(v) for k, v in info.items()}, fps=fps)
+                        **{f'ep_{k}': np.array(v) for k, v in info.items()}, fps=fps, prescan=used_prescan)
     splits = {s: [i for i, x in enumerate(info['split']) if x == s] for s in ('train', 'val', 'test')}
     with open(os.path.join(out, 'splits.json'), 'w', encoding='utf-8') as f:
         json.dump({'splits': splits, 'files': info['file'], 'kind': info['kind'], 'mode': info['mode'],
                    'skipped': skipped}, f, ensure_ascii=False, indent=1)
-    res = {"episodes": len(OB), 'frames': int(sum(info['n'])), 'skipped': skipped, 'splits': splits, 'lerobot': None}
+    res = {'prescan': used_prescan, "episodes": len(OB), 'frames': int(sum(info['n'])), 'skipped': skipped, 'splits': splits, 'lerobot': None}
     if lerobot:
         res['lerobot'] = write_lerobot(out, OB, A, info, fps)
     return res
@@ -115,9 +119,12 @@ def main(argv=None):
     ap.add_argument('--out', required=True)
     ap.add_argument('--no-lerobot', action='store_true')
     ap.add_argument('--fps', type=int, default=FPS)
+    ap.add_argument('--no-prescan', action='store_true',
+                    help='용접 전 시작 구간 스캔을 버퍼에 넣지 않음 (스캔 효과 비교용)')
     args = ap.parse_args(argv)
-    r = convert(args.episodes, args.out, not args.no_lerobot, args.fps)
-    print(f'에피소드 {r["episodes"]}개, 프레임 {r["frames"]}개 ({args.fps} Hz) → {os.path.abspath(args.out)}')
+    r = convert(args.episodes, args.out, not args.no_lerobot, args.fps, not args.no_prescan)
+    print(f'에피소드 {r["episodes"]}개, 프레임 {r["frames"]}개 ({args.fps} Hz), '
+          f'시작 구간 스캔 {"있음" if r["prescan"] else "없음"} → {os.path.abspath(args.out)}')
     print('나눔: ' + ', '.join(f'{k} {len(v)}' for k, v in r['splits'].items()))
     for name, why in r['skipped']:
         print(f'  제외 {name}: {why}')

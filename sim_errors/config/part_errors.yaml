@@ -51,6 +51,9 @@ sensors:                   # laser_* = 토치 앞 이음매 단면 센서 모델
   laser_patch_along_mm: 10    # 평면을 맞추는 패치: 이음매 방향 길이
   laser_patch_across_mm: 15   #   판마다 뿌리에서 바깥으로 폭
   laser_point_step_mm: 1.0    #   점 간격
+  prescan_mm: 30              # 용접 전 시작 구간 스캔 길이 (아크 끄고 손목 카메라로). 0이면 안 함.
+                              #   단면은 토치 앞 30 mm만 재므로 스캔이 없으면 시작 30 mm(첫 가접)를 못 본다
+  prescan_step_mm: 0.5        #   스캔 단면 간격
 
 expert:                    # 규칙 전문가 (privileged: 실제 경로를 안다)
   travel_speed_mm_s: 5.0

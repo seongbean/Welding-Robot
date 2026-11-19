@@ -181,7 +181,8 @@ def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
     xv, yv = norm(Xva, mu_o, sd_o), norm(Yva, mu_a, sd_a)
     cfg = {'model': model, 'groups': list(groups), 'obs_names': names, 'n_in': len(idx),
            'n_out': len(ACTION_NAMES), 'hidden': hidden or (256 if model == 'mlp' else 128),
-           'layers': layers or (2 if model == 'mlp' else 1), 'seq': seq_len, 'fps': int(fr['fps'])}
+           'layers': layers or (2 if model == 'mlp' else 1), 'seq': seq_len, 'fps': int(fr['fps']),
+           'prescan': bool(fr['prescan']) if 'prescan' in fr else False}
     net = build(cfg)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
