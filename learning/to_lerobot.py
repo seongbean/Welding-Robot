@@ -10,7 +10,8 @@
 - 시나리오에 시작 구간 스캔(sensors.prescan, 아크 끄고 시작 30 mm)이 있으면 그 측정으로 단면 버퍼를 먼저 채운다.
   --no-prescan이면 넣지 않는다. 이전 기록은 sim_errors.resense로 지금 센서 설정을 넣어야 스캔이 생긴다.
 - 학습·검증·시험 나눔은 시나리오의 episode.split (에피소드 단위). 가혹 묶음은 시험(평가 전용).
-- frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode, perturb.
+- frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode, perturb,
+  prescan(시작 구간 스캔을 넣었는지, train_bc가 policy.pt cfg로 옮김).
   학습(learning/train_bc.py)은 이 파일을 읽는다.
 - LeRobotDataset (pip install "lerobot[dataset]"이 있으면): <out>/lerobot, repo_id local/<폴더 이름>, fps 10,
   observation.state(61), action(7), task = "T fillet weld (weave|straight)". 나눔은 <out>/splits.json.
