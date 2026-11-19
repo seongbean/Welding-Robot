@@ -89,3 +89,22 @@ episode:                   # 학습용 묶음 (에피소드 생성 사양 "에�
     angle_deg: 1.0         # 작업각·진행각 표준편차
     duration_s: [0.5, 2.0] # 한 번 지속 (반 코사인 창)
     interval_s: [1.0, 4.0] # 섭동 사이 쉬는 시간
+
+# 시편군별 설정 (에피소드 생성 사양 "시편"). 위 섹션이 T 필릿 기본값이자 공통값이고, 여기는 바꿀 것만 쓴다.
+# make_scenarios --family <군>으로 고른다. 수치는 모두 가정치.
+families:
+  fillet_corner:           # ㄱ자 코너 필릿 (수평 필릿 2F). 웹이 바닥 판 끝 위에 바깥 면을 맞춰 선다.
+    geometry:              #   poscoenc corner 시편(두께 18, 날개 180)에서 모양만, 길이는 T와 같게 300
+      length_mm: 300
+      base_width_mm: 180   # 바닥 판 토치 쪽 날개 폭 (T와 달리 한쪽만)
+      base_thickness_mm: 18
+      web_height_mm: 180
+      web_thickness_mm: 18
+    pre_weld:
+      web_bow_mm_per_m: 2.5   # 웹이 바닥 판 끝에만 얹혀 있어 T보다 조금 더 휜다고 가정
+      web_square_deg: 2.0     # 웹 직각도: 조립 때 웹이 90°에서 기운 각, ± (코너만. 웹 뒤를 받치는 판이 없음)
+    in_weld:
+      web_tilt_deg: 2.0       # 웹 뒤쪽을 잡아 주는 판이 없어 T(±1°)보다 더 기운다고 가정
+      base_angle_deg: [0.5, 2.5]   # 날개 한쪽만 있어 구속이 약함
+    episode:
+      counts: {single: 70}    # 단독 = 오차 14종(웹 직각도 포함) × 5

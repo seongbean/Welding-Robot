@@ -1,16 +1,19 @@
 name: Experiment (kinematic gen + BC train + eval)
 
 # 오래 걸리는 실험(운동학 사양 묶음 생성 → 변환 → MLP/GRU 학습 → 닫힌 루프 평가)을 GitHub에서 돌린다.
-# Actions 탭의 "Run workflow"에서 브랜치를 골라 손으로 돌린다 (main에 병합된 뒤부터 보임).
-# 한 번에 러너 약 3시간분을 쓰므로 push마다 돌지 않게 했다.
+# Actions 탭의 "Run workflow"에서 브랜치를 골라 손으로 돌린다.
+# 한 번에 러너 약 5시간분을 쓰므로 push마다 돌지 않게 했다.
 # 결과: 실행 요약(Summary)의 표, 그리고 eval-* 아티팩트(eval.json).
-# 지금 실험: 용접 전 시작 구간 스캔(prescan) 있음/없음 비교 (MLP, GRU, 규칙 기준선).
+# 지금 실험: 시편군 (T 필릿, ㄱ자 코너 필릿). 정책을 T만 / 코너만 / 둘 다로 학습하고 두 군 시험에서 본다
+#   (한 정책이 두 군을 덮는지, T 정책이 코너로 옮겨 가는지). mlp_both242 = 둘 다 섞되 학습 수 242 (수량 대조).
+#   모두 용접 전 시작 구간 스캔 있음.
+#   이전 실험(시작 구간 스캔 있음/없음)은 PR #21 때 이 파일의 git 기록에 있다.
 
 on:
   workflow_dispatch:
     inputs:
       scale:
-        description: '묶음 개수 배율 (1.0 = 사양 330개)'
+        description: '묶음 개수 배율 (1.0 = 시편군마다 사양 수량, T 330 · 코너 335)'
         default: '1.0'
 
 env:
@@ -29,9 +32,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install numpy pyyaml
-      - name: Make batch and pick this shard
+      - name: Make batches (T + corner) and pick this shard
         run: |
           python -m sim_errors.make_scenarios --batch --scale "$SCALE" --out batch_all
+          python -m sim_errors.make_scenarios --batch --scale "$SCALE" --family fillet_corner --out batch_all
           mkdir -p batch
           ls batch_all/*.json | sort | awk -v n="$SHARDS" -v k=${{ matrix.shard }} 'NR % n == k' | xargs -I{} cp {} batch/
           ls batch | wc -l
@@ -59,23 +63,23 @@ jobs:
           pattern: episodes-*
           path: episodes
           merge-multiple: true
-      - name: Convert (with and without start-zone scan)
+      - name: Convert (both families in one dataset)
+        run: python -m learning.to_lerobot episodes --out data --no-lerobot
+      - name: Train (T only, corner only, both)
         run: |
-          python -m learning.to_lerobot episodes --out data_scan --no-lerobot
-          python -m learning.to_lerobot episodes --out data_noscan --no-lerobot --no-prescan
-      - name: Train
-        run: |
-          python -m learning.train_bc data_scan --model mlp --out runs/mlp_scan
-          python -m learning.train_bc data_noscan --model mlp --out runs/mlp_noscan
-          python -m learning.train_bc data_scan --model gru --out runs/gru_scan
-          python -m learning.train_bc data_noscan --model gru --out runs/gru_noscan
+          for m in mlp gru; do
+            python -m learning.train_bc data --model $m --family fillet_t --out runs/${m}_t
+            python -m learning.train_bc data --model $m --family fillet_corner --out runs/${m}_corner
+            python -m learning.train_bc data --model $m --out runs/${m}_both
+          done
+          # 수량 대조: 둘 다 섞되 학습 수를 한 군과 같게(242). 섞인 효과와 수량 효과를 가른다
+          python -m learning.train_bc data --model mlp --max-train 242 --out runs/mlp_both242
       - uses: actions/upload-artifact@v4
         with:
           name: runs
           path: |
             runs/
-            data_scan/
-            data_noscan/
+            data/
           retention-days: 7
 
   evaluate:
@@ -83,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        policy: [mlp_scan, mlp_noscan, gru_scan, gru_noscan, rule, rule-noprescan]
+        policy: [mlp_t, mlp_corner, mlp_both, mlp_both242, gru_t, gru_corner, gru_both, rule]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -101,15 +105,14 @@ jobs:
         with:
           name: runs
           path: .
-      - name: Closed-loop evaluation
+      - name: Closed-loop evaluation (T and corner test sets)
         run: |
           p=${{ matrix.policy }}
-          case "$p" in
-            rule) python -m learning.evaluate rule --data data_scan --episodes episodes --jobs 2 --rule-dir runs ;;
-            rule-noprescan) python -m learning.evaluate rule-noprescan --data data_noscan --episodes episodes --jobs 2 --rule-dir runs ;;
-            *scan) d=data_scan; [[ "$p" == *noscan ]] && d=data_noscan
-                   python -m learning.evaluate runs/$p/policy.pt --data $d --episodes episodes --jobs 2 ;;
-          esac
+          if [ "$p" = rule ]; then
+            python -m learning.evaluate rule --data data --episodes episodes --jobs 2 --rule-dir runs
+          else
+            python -m learning.evaluate runs/$p/policy.pt --data data --episodes episodes --jobs 2
+          fi
           mkdir -p out/$p && cp runs/$p/eval.json out/$p/
           [ -f runs/$p/train_log.json ] && cp runs/$p/train_log.json out/$p/ || true
       - uses: actions/upload-artifact@v4
@@ -134,12 +137,16 @@ jobs:
       - name: Summary table
         run: |
           {
-            echo "## 닫힌 루프 평가 (전체 시험)"
-            python -m learning.report_evals out/*/eval.json
-            echo
-            echo "## 가혹 묶음"
-            python -m learning.report_evals out/*/eval.json --kind hard
-            echo
-            echo "## 혼합 묶음"
-            python -m learning.report_evals out/*/eval.json --kind mixed
+            for f in fillet_corner fillet_t; do
+              name=$([ $f = fillet_t ] && echo "T 필릿" || echo "코너 필릿")
+              echo "## ${name} 시험 (전체)"
+              python -m learning.report_evals out/*/eval.json --kind fam_$f
+              echo
+              echo "## ${name} 가혹 묶음"
+              python -m learning.report_evals out/*/eval.json --kind fam_${f}_hard
+              echo
+              echo "## ${name} 혼합 묶음"
+              python -m learning.report_evals out/*/eval.json --kind fam_${f}_mixed
+              echo
+            done
           } | tee -a "$GITHUB_STEP_SUMMARY"

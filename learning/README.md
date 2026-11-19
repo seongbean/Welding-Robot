@@ -48,10 +48,26 @@ python -m learning.evaluate rule rule-noprescan --data datasets\t_small --episod
 python -m learning.report_evals runs\mlp\eval.json runs\rule\eval.json runs\rule-noprescan\eval.json
 ```
 
-사양 수량(330개) 생성부터 평가까지는 GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)를 Run workflow로 돌린다. 약 30분, 러너 약 3시간분이라 push로는 돌지 않는다. 결과는 실행 요약의 표와 `eval-*` 아티팩트.
+### 시편군 (T 필릿 + ㄱ자 코너 필릿)
+
+시편군마다 묶음을 만들고 에피소드 폴더 여러 개를 한 데이터로 합친다. 에피소드마다 시편군(`ep_family`)이 기록되어,
+학습(`train_bc --family`)과 평가(`evaluate --family`)를 군별로 나눌 수 있다. 섞인 시험을 평가하면 표에 군별 줄
+(`fam_fillet_t`, `fam_fillet_corner`, `fam_<군>_<강도>`)이 더해진다.
+
+```bat
+python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches\corner
+python sim_bridge\run_batch.py batches\corner --out episodes\corner --follower-urdf C:\...\opti3.urdf
+python -m learning.to_lerobot episodes\t episodes\corner --out datasets\t_corner
+python -m learning.train_bc datasets\t_corner --family fillet_t --out runs\mlp_t
+python -m learning.train_bc datasets\t_corner --out runs\mlp_both
+python -m learning.evaluate runs\mlp_t\policy.pt runs\mlp_both\policy.pt --data datasets\t_corner --episodes episodes\t episodes\corner
+python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
+```
+
+사양 수량 생성부터 평가까지는 GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)를 Run workflow로 돌린다. 지금 실험은 T 330 + 코너 335 운동학 에피소드로 MLP/GRU를 T만·코너만·둘 다로 학습해 두 군 시험에서 본다. 러너 시간을 많이 써서 push로는 돌지 않는다. 결과는 실행 요약의 표와 `eval-*` 아티팩트.
 
 - 나눔은 시나리오의 `episode.split`(에피소드 단위 학습 80 · 검증 10 · 시험 10, 가혹은 모두 시험).
-- 평가 결과는 `<정책 폴더>/eval.json`(규칙 기준선은 `<rule-dir>/rule/eval.json`), 학습 곡선은 `train_log.json`.
+- 평가 결과는 `<정책 폴더>/eval.json`(`--name X`면 `eval_X.json`, 규칙 기준선은 `<rule-dir>/rule/eval.json`), 학습 곡선은 `train_log.json`.
 - 높이 오차는 시작 30 mm와 나머지로도 나눠 나온다. 시작 구간 스캔으로 학습한 정책(`policy.pt`의 `prescan`)은 닫힌 루프에서도 스캔을 넣는다.
 - 닫힌 루프 평가는 로봇이 명령을 바로 따라간다고 가정한다. Isaac 추종 오차는 들어가지 않는다.
 
@@ -158,9 +174,45 @@ python -m learning.evaluate runs\mlp_n048\policy.pt runs\mlp_noperturb\policy.pt
 - 각도는 정책이 규칙보다 훨씬 낫다(작업각 74% 대 28%). 버퍼 9점의 판 면 기울기를 모아 노이즈를 거르기 때문으로 보인다.
 - GRU는 작업각이 조금 낫고(84% 대 74%) 높이·좌우는 MLP가 조금 낫다. 기준 정책은 계속 MLP로 둔다.
 
+## 코너 필릿 한 바퀴와 시편군 교차 비교 (운동학, GitHub 실험 워크플로)
+
+[실행 44453804249](https://github.com/seongbean/Welding-Robot/actions/runs/44453804249): T 330 + 코너 335 운동학 에피소드를 한 데이터로 바꾸고,
+MLP/GRU를 T만(학습 242) · 코너만(학습 245) · 둘 다(학습 487)로 학습해 두 군 시험(T 59, 코너 60, 가혹 30씩 포함)에서 닫힌 루프로 평가했다.
+모두 시작 구간 스캔 있음, 입력 기본값. 생성 약 25분, 학습 10분, 평가 15분.
+
+코너 필릿 시험 60개, 닫힌 루프 RMS (보정 0 대비 개선율). 보정 0: 좌우 1.28, 높이 1.34, 작업각 0.75, 진행각 0.60 (작업각이 T 0.22보다 큰 것은 웹 직각도 때문).
+
+| 정책 | 학습 | 좌우 mm | 높이 mm | 작업각 deg | 진행각 deg | 높이 나머지 | 위빙 차 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **MLP** | **T+코너** | **0.15 (88%)** | **0.14 (89%)** | 0.06 (92%) | 0.15 (75%) | 0.15 | 0.06 |
+| MLP | 코너 | 0.20 (84%) | 0.20 (85%) | 0.06 (92%) | 0.15 (75%) | 0.21 | 0.07 |
+| MLP | T | 0.21 (84%) | 0.26 (81%) | 0.09 (88%) | 0.17 (72%) | 0.27 | 0.15 |
+| GRU | T+코너 | 0.26 (80%) | 0.20 (85%) | 0.07 (91%) | 0.17 (72%) | 0.20 | 0.07 |
+| GRU | 코너 | 0.28 (78%) | 0.25 (81%) | 0.08 (90%) | 0.15 (76%) | 0.26 | 0.09 |
+| GRU | T | 0.39 (69%) | 0.38 (72%) | 0.22 (71%) | 0.19 (68%) | 0.38 | 0.23 |
+| 규칙 | - | 0.22 (82%) | 0.24 (82%) | 0.15 (79%) | 0.30 (50%) | 0.26 | 0.07 |
+
+T 필릿 시험 59개 (보정 0: 좌우 1.14, 높이 1.34, 작업각 0.22, 진행각 0.60).
+
+| 정책 | 학습 | 좌우 mm | 높이 mm | 작업각 deg | 진행각 deg |
+| --- | --- | --- | --- | --- | --- |
+| **MLP** | **T+코너** | **0.15 (87%)** | **0.14 (89%)** | 0.05 (75%) | 0.14 (76%) |
+| MLP | T | 0.19 (84%) | 0.20 (85%) | 0.06 (75%) | 0.15 (74%) |
+| MLP | 코너 | 0.19 (84%) | 0.19 (86%) | 0.06 (72%) | 0.15 (75%) |
+| GRU | T+코너 | 0.20 (82%) | 0.18 (87%) | 0.03 (84%) | 0.16 (73%) |
+| 규칙 | - | 0.19 (83%) | 0.21 (85%) | 0.16 (28%) | 0.30 (49%) |
+
+가혹 묶음도 순위가 같다(코너 가혹: MLP T+코너 높이 0.18 mm 89%, 코너만 0.26, T만 0.33, 규칙 0.31).
+
+- 코너 필릿에서도 같은 흐름이 그대로 돈다. 코너만으로 학습한 MLP가 T에서 T만으로 학습한 MLP와 같은 수준이다(높이 85%).
+- 두 군을 합쳐 학습한 MLP 하나가 두 군 모두에서 가장 좋다. 높이 0.14 mm로, 지금까지 센서 한계로 보던 규칙(0.21–0.24 mm)보다도 낫다.
+- 수량 대조([실행 44460136780](https://github.com/seongbean/Welding-Robot/actions/runs/44460136780), `mlp_both242`): 두 군을 섞되 학습 수를 한 군과 같게(242) 맞추면 코너 높이 0.19 mm(86%), T 높이 0.18 mm(86%)로, 각 군만으로 학습한 MLP(0.20 mm)와 거의 같다. 좋아진 것은 대부분 학습 수(242 → 487) 덕이고, 군을 섞어서 손해 보는 것은 없다. 다른 군 데이터도 수량으로 쳐 준다는 뜻이라 공용 정책 하나로 간다(사용자 결정, [설계 결정](../docs/design-decisions.md) "시편군과 정책").
+- T로만 학습한 MLP도 코너에서 꽤 버틴다(높이 81%). 다만 처음 보는 웹 직각도 때문에 작업각 0.09 deg, 위빙 차 0.15 mm로 나빠진다. GRU는 옮겨 가기에 약하다(T만 → 코너 높이 72%, 작업각 71%).
+- 기준 정책은 계속 MLP다.
+
 ## 다음 단계
 
 - DAgger는 보류했다(사용자 결정). 지금 관측에서는 정책 출력이 다음 관측을 거의 바꾸지 않아(위 섭동 비교) 시뮬 DAgger로 얻을 것이 적다. 카메라 시야가 토치를 따라 움직이는 효과를 모델링하거나, 정책 출력에 따라 바뀌는 입력을 넣을 때 다시 본다.
 - 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값 맞추기. 시작 구간 스캔 자세의 노이즈도 따로 잰다.
 - 이전 Isaac 기록은 `python -m sim_errors.resense`로 지금 센서 설정(스캔 포함)을 넣은 뒤 다시 변환한다.
-- 다음 시편군(코너 필릿).
+- 다음 시편군(맞대기 V홈). 공용 MLP에 합쳐 학습하고 군별 줄(`fam_<군>`)로 한 군이 나빠지지 않는지 본다.

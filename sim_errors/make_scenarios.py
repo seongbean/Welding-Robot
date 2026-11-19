@@ -8,6 +8,11 @@
   python -m sim_errors.make_scenarios --single all --out scenarios_single/ # 오차별 단독 검증용 (하나만 과장해서 켬)
   python -m sim_errors.make_scenarios --batch --out batches/t_fillet/       # 학습용 묶음 (깨끗함·단독·혼합·가혹)
   python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches/t_small/   # 수량 1/5로 먼저 한 바퀴
+  python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches/corner/   # ㄱ자 코너 필릿
+
+--family는 config families 섹션의 시편군을 고른다 (기본 = geometry.joint, 지금은 fillet_t).
+T 필릿이 아닌 시편군의 묶음 파일 이름에는 군 머리말(corner_ 등)이 붙어, 여러 군 에피소드를 한 폴더에 섞어도
+이름이 겹치지 않는다. 같은 --seed라도 시편군마다 다른 오차를 뽑는다.
 
 학습용 묶음(--batch)은 config episode 섹션의 개수로 시나리오를 만들고, 각 시나리오에 episode 설정
 (강도, 직선/위빙 모드, 시작 어긋남, 실행 섭동, 학습·검증·시험 나눔)을 붙인다. 모두 용접 구간만 담는다.
@@ -24,8 +29,12 @@ import sys
 import numpy as np
 import yaml
 
-from .part_errors import (KINDS, SINGLE_ERRORS, episode_meta, next_pass, sample_scenario, save_scenario, scale_cfg,
-                          signature, single_error, single_in_range, summarize, zero_errors)
+from .part_errors import (JOINTS, KINDS, SINGLE_ERRORS, episode_meta, family_cfg, next_pass, sample_scenario,
+                          save_scenario, scale_cfg, signature, single_error, single_in_range, single_names, summarize, zero_errors)
+
+# 시편군 → 묶음 파일 머리말, 난수 열쇠 (T 필릿은 예전과 같은 이름·난수를 유지)
+FAMILY_PREFIX = {'fillet_t': '', 'fillet_corner': 'corner_'}
+FAMILY_KEY = {'fillet_t': (), 'fillet_corner': (1,)}
 
 DEFAULT_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'part_errors.yaml')
 
@@ -38,6 +47,7 @@ def main(argv=None):
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--config', default=DEFAULT_CFG)
+    ap.add_argument('--family', choices=JOINTS, help='시편군 (기본: config geometry.joint)')
     ap.add_argument('--n', type=int, default=10, help='시나리오(모재) 개수')
     ap.add_argument('--passes', type=int, default=1, help='모재당 패스 수 (2 이상이면 잔류 변형을 다음 패스로 넘김)')
     ap.add_argument('--seed', type=int, default=0)
@@ -50,7 +60,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     with open(args.config, encoding='utf-8') as f:
-        cfg = yaml.safe_load(f)
+        cfg = family_cfg(yaml.safe_load(f), args.family)
     if args.single:
         return write_single(cfg, args)
     if args.batch:
@@ -99,13 +109,16 @@ def make_batch(cfg: dict, counts: dict, seed: int = 0) -> list[tuple[str, dict]]
     """학습용 묶음 [(파일 이름, 시나리오)]."""
     ep = cfg['episode']
     hard_cfg = scale_cfg(cfg, ep['hard_scale'])
-    names = list(SINGLE_ERRORS)
+    names = single_names(cfg)
+    joint = cfg['geometry'].get('joint', 'fillet_t')
+    fk, prefix = FAMILY_KEY[joint], FAMILY_PREFIX[joint]
     out = []
     for k, kind in enumerate(KINDS):
         n = int(counts.get(kind, 0))
-        splits = ['test'] * n if kind == 'hard' else _splits(n, ep['split'], np.random.default_rng([seed, k, 99]))
+        splits = (['test'] * n if kind == 'hard'
+                  else _splits(n, ep['split'], np.random.default_rng([seed, k, 99, *fk])))
         for i in range(n):
-            rng = np.random.default_rng([seed, k, i])
+            rng = np.random.default_rng([seed, k, i, *fk])
             sid = seed * 100000 + k * 10000 + i
             if kind == 'clean':
                 src = sample_scenario(cfg, rng, seed=sid)
@@ -120,7 +133,7 @@ def make_batch(cfg: dict, counts: dict, seed: int = 0) -> list[tuple[str, dict]]
             mode = 'weave' if _pick(i, ep['weave_ratio']) else 'straight'
             perturb = kind == 'mixed' and _pick(i // 2, ep['perturb_ratio'])
             scn['episode'] = episode_meta(kind, mode, rng, ep, perturb, splits[i])
-            out.append((f'{kind}_{i:04d}.json', scn))
+            out.append((f'{prefix}{kind}_{i:04d}.json', scn))
     return out
 
 
@@ -133,7 +146,7 @@ def write_batch(cfg: dict, args) -> None:
     os.makedirs(args.out, exist_ok=True)
     for name, scn in batch:
         save_scenario(scn, os.path.join(args.out, name))
-    print(f'학습용 묶음 {len(batch)}개 → {os.path.abspath(args.out)}')
+    print(f'학습용 묶음 {len(batch)}개 ({cfg["geometry"]["joint"]}) → {os.path.abspath(args.out)}')
     print(f'{"강도":<8}{"개수":>6}{"위빙":>6}{"직선":>6}{"섭동":>6}{"학습":>6}{"검증":>6}{"시험":>6}')
     for kind in KINDS:
         ep = [s['episode'] for _, s in batch if s['episode']['kind'] == kind]
@@ -148,7 +161,7 @@ def write_batch(cfg: dict, args) -> None:
 
 def write_single(cfg: dict, args) -> None:
     """오차 하나만 과장해서 켠 시나리오를 쓰고, 토치 위치(s_arc = s)의 기대 정답을 표로 보여 준다."""
-    names = list(SINGLE_ERRORS) if args.single == 'all' else args.single.split(',')
+    names = single_names(cfg) if args.single == 'all' else args.single.split(',')
     base = sample_scenario(cfg, np.random.default_rng([args.seed, 0]), seed=args.seed)
     os.makedirs(args.out, exist_ok=True)
     print('기대 정답 (토치가 s에 있을 때): 좌우 e_y / 높이 e_z [mm], 작업각 / 진행각 [deg], 틈새 / 가접 [mm]')

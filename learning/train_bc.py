@@ -116,8 +116,15 @@ def load_frames(path: str) -> dict:
     return {k: d[k] for k in d.files}
 
 
-def episodes_of(fr: dict, split: str) -> list[int]:
-    return [i for i, s in enumerate(fr['ep_split']) if s == split]
+def episode_family(fr: dict, e: int) -> str:
+    """에피소드 시편군 (예전 frames.npz에는 표시가 없어 T 필릿)."""
+    return str(fr['ep_family'][e]) if 'ep_family' in fr else 'fillet_t'
+
+
+def episodes_of(fr: dict, split: str, families=None) -> list[int]:
+    """나눔 split의 에피소드 번호. families(이름 목록)를 주면 그 시편군만."""
+    return [i for i, s in enumerate(fr['ep_split'])
+            if s == split and (not families or episode_family(fr, i) in families)]
 
 
 def pick_train(fr: dict, eps: list[int], max_train: int | None = None, no_perturb: bool = False,
@@ -159,13 +166,15 @@ def windows(fr: dict, eps: list[int], seq: int) -> tuple[np.ndarray, np.ndarray]
 def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
           epochs: int = 40, seq: int = 20, hidden: int | None = None, layers: int | None = None, lr: float = 1e-3,
           batch: int = 256, seed: int = 0, max_train: int | None = None, no_perturb: bool = False,
-          verbose: bool = True) -> dict:
+          verbose: bool = True, families=None) -> dict:
+    """families: 학습·검증에 쓸 시편군 이름 목록 (None = 데이터에 있는 전부)."""
     torch.manual_seed(seed)
     np.random.seed(seed)
     fr = load_frames(data)
     names = group_names(groups)
     idx = columns(fr['obs_names'], names)
-    tr, va = pick_train(fr, episodes_of(fr, 'train'), max_train, no_perturb, seed), episodes_of(fr, 'val')
+    tr = pick_train(fr, episodes_of(fr, 'train', families), max_train, no_perturb, seed)
+    va = episodes_of(fr, 'val', families)
     if not tr:
         raise SystemExit('학습 에피소드가 없음')
     va = va or tr
@@ -182,7 +191,8 @@ def train(data: str, out: str, model: str = 'mlp', groups=DEFAULT_GROUPS,
     cfg = {'model': model, 'groups': list(groups), 'obs_names': names, 'n_in': len(idx),
            'n_out': len(ACTION_NAMES), 'hidden': hidden or (256 if model == 'mlp' else 128),
            'layers': layers or (2 if model == 'mlp' else 1), 'seq': seq_len, 'fps': int(fr['fps']),
-           'prescan': bool(fr['prescan']) if 'prescan' in fr else False}
+           'prescan': bool(fr['prescan']) if 'prescan' in fr else False,
+           'families': sorted({episode_family(fr, e) for e in tr})}
     net = build(cfg)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
@@ -243,9 +253,11 @@ def main(argv=None):
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--max-train', type=int, help='학습 에피소드 N개만 (강도별 비율 유지)')
     ap.add_argument('--no-perturb', action='store_true', help='섭동 에피소드를 학습에서 뺌')
+    ap.add_argument('--family', help='이 시편군만 학습 (쉼표로 여러 개, 예: fillet_t). 기본 = 데이터 전부')
     args = ap.parse_args(argv)
     r = train(args.data, args.out, args.model, args.obs.split(','), args.epochs, args.seq, args.hidden, args.layers,
-              args.lr, seed=args.seed, max_train=args.max_train, no_perturb=args.no_perturb)
+              args.lr, seed=args.seed, max_train=args.max_train, no_perturb=args.no_perturb,
+              families=args.family.split(',') if args.family else None)
     print(f'최저 검증 손실 {r["best_val"]:.4f} (정규화 MSE), 학습 에피소드 {r["train_episodes"]}개, '
           f'{r["seconds"]} s → {os.path.join(args.out, "policy.pt")}')
 

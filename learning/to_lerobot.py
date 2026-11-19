@@ -4,17 +4,21 @@
 사용법 (저장소 루트에서)
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small --no-lerobot   # frames.npz만
+  python -m learning.to_lerobot episodes/t episodes/corner --out datasets/t_corner     # 여러 시편군을 한 데이터로
 
 - 관측·행동 정의는 learning/features.py (관측 61개, 행동 7개).
 - 묶음 실행 보고서(<에피소드 폴더>/batch_report.json)가 있으면 점검에 실패한 에피소드는 뺀다.
 - 시나리오에 시작 구간 스캔(sensors.prescan, 아크 끄고 시작 30 mm)이 있으면 그 측정으로 단면 버퍼를 먼저 채운다.
   --no-prescan이면 넣지 않는다. 이전 기록은 sim_errors.resense로 지금 센서 설정을 넣어야 스캔이 생긴다.
 - 학습·검증·시험 나눔은 시나리오의 episode.split (에피소드 단위). 가혹 묶음은 시험(평가 전용).
-- frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode, perturb,
+- 에피소드 폴더를 여러 개 주면 한 데이터로 합친다 (파일 이름이 겹치면 안 됨: 코너 묶음은 corner_ 머리말).
+  시편군(family = 시나리오 geometry.joint)을 에피소드마다 적어 두므로 train_bc·evaluate의 --family로 나눠 쓸 수 있다.
+- frames.npz: obs, action, episode_index, frame_index, timestamp + 에피소드별 file, split, kind, mode, perturb, family,
   prescan(시작 구간 스캔을 넣었는지, train_bc가 policy.pt cfg로 옮김).
   학습(learning/train_bc.py)은 이 파일을 읽는다.
 - LeRobotDataset (pip install "lerobot[dataset]"이 있으면): <out>/lerobot, repo_id local/<폴더 이름>, fps 10,
-  observation.state(61), action(7), task = "T fillet weld (weave|straight)". 나눔은 <out>/splits.json.
+  observation.state(61), action(7), task = "<시편군> weld (weave|straight)" (예: T fillet, corner fillet).
+  나눔은 <out>/splits.json.
   나중에 ACT·Diffusion 등 LeRobot 정책과 비교할 때 쓴다.
 """
 from __future__ import annotations
@@ -40,12 +44,23 @@ def failed_episodes(ep_dir: str) -> dict[str, str]:
     return {e['file']: e.get('reason', '') for e in rep.get('episodes', []) if not e.get('ok', False)}
 
 
-def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS, prescan: bool = True) -> dict:
-    files = sorted(f for f in glob.glob(os.path.join(ep_dir, '*.npz')) if not f.endswith('.failed.npz'))
-    bad = failed_episodes(ep_dir)
+TASK_NAMES = {'fillet_t': 'T fillet', 'fillet_corner': 'corner fillet'}
+
+
+def convert(ep_dir, out: str, lerobot: bool = True, fps: int = FPS, prescan: bool = True) -> dict:
+    """ep_dir: 에피소드 폴더 하나 또는 여러 개 (리스트)."""
+    dirs = [ep_dir] if isinstance(ep_dir, str) else list(ep_dir)
+    files, bad = [], {}
+    for d in dirs:
+        files += sorted(f for f in glob.glob(os.path.join(d, '*.npz')) if not f.endswith('.failed.npz'))
+        bad.update(failed_episodes(d))
+    names = [os.path.basename(f) for f in files]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise SystemExit(f'에피소드 파일 이름이 폴더끼리 겹침: {", ".join(dup[:5])}')
     os.makedirs(out, exist_ok=True)
     OB, A, E, F, T = [], [], [], [], []
-    info = {'file': [], 'split': [], 'kind': [], 'mode': [], 'perturb': [], 'n': []}
+    info = {'file': [], 'split': [], 'kind': [], 'mode': [], 'perturb': [], 'family': [], 'n': []}
     skipped = []
     used_prescan = False
     for path in files:
@@ -71,6 +86,7 @@ def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS, prescan
         info['kind'].append(epi.get('kind', ''))
         info['mode'].append(epi.get('mode', 'weave'))
         info['perturb'].append(bool(epi.get('perturb', False)))
+        info['family'].append(scn['geometry'].get('joint', 'fillet_t'))
         info['n'].append(len(obs))
     if not OB:
         raise SystemExit(f'변환할 에피소드가 없음: {ep_dir}')
@@ -81,8 +97,8 @@ def convert(ep_dir: str, out: str, lerobot: bool = True, fps: int = FPS, prescan
     splits = {s: [i for i, x in enumerate(info['split']) if x == s] for s in ('train', 'val', 'test')}
     with open(os.path.join(out, 'splits.json'), 'w', encoding='utf-8') as f:
         json.dump({'splits': splits, 'files': info['file'], 'kind': info['kind'], 'mode': info['mode'],
-                   'skipped': skipped}, f, ensure_ascii=False, indent=1)
-    res = {'prescan': used_prescan, "episodes": len(OB), 'frames': int(sum(info['n'])), 'skipped': skipped, 'splits': splits, 'lerobot': None}
+                   'family': info['family'], 'skipped': skipped}, f, ensure_ascii=False, indent=1)
+    res = {'prescan': used_prescan, 'families': sorted(set(info['family'])), "episodes": len(OB), 'frames': int(sum(info['n'])), 'skipped': skipped, 'splits': splits, 'lerobot': None}
     if lerobot:
         res['lerobot'] = write_lerobot(out, OB, A, info, fps)
     return res
@@ -101,9 +117,10 @@ def write_lerobot(out: str, OB, A, info, fps: int) -> str | None:
                 'action': {'dtype': 'float32', 'shape': (len(ACTION_NAMES),), 'names': ACTION_NAMES}}
     ds = LeRobotDataset.create(repo_id=f'local/{os.path.basename(os.path.normpath(out))}', fps=fps,
                                features=features, root=root, robot_type='opti3', use_videos=False)
-    for obs, act, mode in zip(OB, A, info['mode']):
+    for obs, act, mode, fam in zip(OB, A, info['mode'], info['family']):
+        task = f'{TASK_NAMES.get(fam, fam)} weld ({mode})'
         for o, a in zip(obs, act):
-            ds.add_frame({'observation.state': o, 'action': a, 'task': f'T fillet weld ({mode})'})
+            ds.add_frame({'observation.state': o, 'action': a, 'task': task})
         ds.save_episode()
     ds.finalize()
     return root
@@ -116,7 +133,7 @@ def main(argv=None):
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('episodes', help='에피소드 .npz 폴더 (run_batch.py 출력)')
+    ap.add_argument('episodes', nargs='+', help='에피소드 .npz 폴더 (run_batch.py 출력), 여러 개면 합침')
     ap.add_argument('--out', required=True)
     ap.add_argument('--no-lerobot', action='store_true')
     ap.add_argument('--fps', type=int, default=FPS)
@@ -125,7 +142,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     r = convert(args.episodes, args.out, not args.no_lerobot, args.fps, not args.no_prescan)
     print(f'에피소드 {r["episodes"]}개, 프레임 {r["frames"]}개 ({args.fps} Hz), '
-          f'시작 구간 스캔 {"있음" if r["prescan"] else "없음"} → {os.path.abspath(args.out)}')
+          f'시작 구간 스캔 {"있음" if r["prescan"] else "없음"}, 시편군 {", ".join(r["families"])} '
+          f'→ {os.path.abspath(args.out)}')
     print('나눔: ' + ', '.join(f'{k} {len(v)}' for k, v in r['splits'].items()))
     for name, why in r['skipped']:
         print(f'  제외 {name}: {why}')

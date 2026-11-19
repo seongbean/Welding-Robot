@@ -8,8 +8,13 @@ numpy만 쓴다. Isaac Sim 파이썬(isaac_opti3_receiver.py)과 conda 환경(ex
 - 실제 경로 p_true(s, s_arc) = T_place · [p_nom(s) + 형상 오차(s) + 열변형(s, s_arc) + 밀림(s_arc)]
 정답 e = R_est(s)^T (p_true - p_est): y = 좌우, z = 높이. 각도 정답 = log(R_est^T R_true) (x = 작업각, y = 진행각)
 
-모재 좌표계 (T이음 필릿): 원점 = 이음매 시작점, x = 이음매 방향, 바닥 판 윗면 z = 0,
+모재 좌표계 (필릿 두 군 공통): 원점 = 이음매 시작점, x = 이음매 방향, 바닥 판 윗면 z = 0,
 웹 판 용접 쪽 면 y = 0 (웹은 y >= 0, 토치는 -y 쪽에서 접근). 이음매 좌표계 z = 두 판 법선의 이등분.
+시편군 (geometry.joint)
+- fillet_t: T이음 필릿. 바닥 판이 웹 양쪽으로 뻗는다 (폭 base_width는 양쪽 합).
+- fillet_corner: ㄱ자 코너 필릿. 웹이 바닥 판 끝 위에 바깥 면을 맞춰 선다. 바닥 판은 토치 쪽으로만 뻗는다
+  (base_width = 토치 쪽 날개 폭, 웹 밑은 웹 두께만큼). 안쪽 모서리 필릿이라 이음매·정답·단면 센서 식은 T와 같고,
+  다른 것은 모재 모양과 오차 범위(config families.fillet_corner)다.
 단위: 내부 계산은 m, rad. config(yaml)는 mm, deg.
 """
 from __future__ import annotations
@@ -22,6 +27,7 @@ import numpy as np
 
 BASE, WEB = 0, 1
 SCHEMA_VERSION = 1
+JOINTS = ('fillet_t', 'fillet_corner')   # 지원하는 시편군 (geometry.joint)
 
 
 # ----------------------------------------------------------------------------- 회전 유틸
@@ -122,8 +128,9 @@ MM, DEG = 1e-3, math.pi / 180
 def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None) -> dict:
     """config(dict, yaml 그대로) → 시나리오(dict, JSON으로 저장 가능, 단위 m·rad)."""
     g, pre, inw = cfg['geometry'], cfg['pre_weld'], cfg['in_weld']
-    if g.get('joint', 'fillet_t') != 'fillet_t':
-        raise ValueError(f"지원하지 않는 이음 형태: {g['joint']} (현재 fillet_t만)")
+    joint = g.get('joint', 'fillet_t')
+    if joint not in JOINTS:
+        raise ValueError(f"지원하지 않는 이음 형태: {joint} (가능: {', '.join(JOINTS)})")
     L = g['length_mm'] * MM
     nom = cfg['nominal_pose']
 
@@ -143,12 +150,12 @@ def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None
             if rng.uniform() < inw['jump_prob'] else np.zeros(3))
     span = _uni(rng, inw['drift_span'])
 
-    return {
+    scn = {
         'version': SCHEMA_VERSION,
         'seed': seed,
         'pass_index': 0,
         'geometry': {
-            'joint': 'fillet_t', 'length': L,
+            'joint': joint, 'length': L,
             'base_width': g['base_width_mm'] * MM, 'base_thickness': g['base_thickness_mm'] * MM,
             'web_height': g['web_height_mm'] * MM, 'web_thickness': g['web_thickness_mm'] * MM,
         },
@@ -186,6 +193,32 @@ def sample_scenario(cfg: dict, rng: np.random.Generator, seed: int | None = None
         'sensors': sensors_from_cfg(cfg['sensors']),
         'expert': copy.deepcopy(cfg.get('expert', {})),
     }
+    # 웹 직각도 (조립 때 웹이 90°에서 기운 각, 용접 전부터 있음). 설정한 시편군만 뽑는다
+    # (맨 끝에 뽑아서 설정 없는 T 필릿의 난수 순서는 그대로)
+    if pre.get('web_square_deg', 0):
+        scn['shape']['web_square'] = _uni(rng, pre['web_square_deg']) * DEG
+    return scn
+
+
+def _merge(base: dict, over: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else copy.deepcopy(v)
+    return out
+
+
+def family_cfg(cfg: dict, family: str | None = None) -> dict:
+    """config에서 시편군 하나의 설정을 만든다. 기본 섹션(T 필릿)이 공통값이고, families.<군>이 덮어쓴다.
+    family가 None이거나 기본 군(geometry.joint)이면 기본 섹션 그대로. 결과에는 families 섹션이 없다."""
+    fams = cfg.get('families', {}) or {}
+    out = {k: copy.deepcopy(v) for k, v in cfg.items() if k != 'families'}
+    if family is None or family == out['geometry'].get('joint', 'fillet_t'):
+        return out
+    if family not in fams:
+        raise ValueError(f'config에 시편군 {family}가 없음 (있는 것: {", ".join([out["geometry"]["joint"], *fams])})')
+    out = _merge(out, fams[family])
+    out['geometry']['joint'] = family
+    return out
 
 
 def sensors_from_cfg(c: dict) -> dict:
@@ -278,7 +311,9 @@ class PartErrorModel:
         return self.scn['prior']['base_angle'] + self.scn['heat']['base_angle'] * self._heat_profile(s, s_arc)
 
     def web_tilt(self, s, s_arc):
-        return self.scn['prior']['web_tilt'] + self.scn['heat']['web_tilt'] * self._heat_profile(s, s_arc)
+        """웹 기울기 = 조립 직각도(shape.web_square, 없으면 0) + 앞 패스 잔류 + 이번 패스 열변형."""
+        return (self.scn['shape'].get('web_square', 0.0) + self.scn['prior']['web_tilt']
+                + self.scn['heat']['web_tilt'] * self._heat_profile(s, s_arc))
 
     def slip(self, s_arc) -> np.ndarray:
         sl = self.scn['slip']
@@ -456,8 +491,11 @@ class PartErrorModel:
         g = self.scn['geometry']
         W, tb, H, tw = g['base_width'], g['base_thickness'], g['web_height'], g['web_thickness']
         # 단면 (y, z) 다각형. 바닥 판은 y=0에 꼭짓점을 둬서 각변형 꺾임이 생기게 함
-        sections = [(BASE, [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]),
-                    (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])]
+        if g.get('joint', 'fillet_t') == 'fillet_corner':   # ㄱ자: 바닥 판은 토치 쪽 날개 + 웹 밑까지
+            base = [(-W, -tb), (0, -tb), (tw, -tb), (tw, 0), (0, 0), (-W, 0)]
+        else:
+            base = [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]
+        sections = [(BASE, base), (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])]
         pts, plate, counts, idx = [], [], [], []
         xs = np.linspace(0.0, self.L, nx + 1)
         for pid, sec in sections:
@@ -486,6 +524,8 @@ def zero_errors(scn: dict) -> dict:
     for k in ('web_bow', 'web_wave', 'base_bow', 'base_wave', 'gap0', 'gap1'):
         z['shape'][k] = 0.0
     z['shape']['tacks'] = []
+    if 'web_square' in z['shape']:
+        z['shape']['web_square'] = 0.0
     z['slip'].update(drift=[0.0, 0.0, 0.0], jump=[0.0, 0.0, 0.0])
     z['heat'].update(base_angle=0.0, web_tilt=0.0, bow=0.0, gap_close=0.0)
     z['prior'] = {'base_angle': 0.0, 'web_tilt': 0.0, 'bow': 0.0}
@@ -507,6 +547,7 @@ SINGLE_ERRORS = {
     'web_tilt': ('웹 기울어짐', {'heat': {'web_tilt': 3 * DEG, 'length': 30 * MM}}),
     'bow': ('세로 휨', {'heat': {'bow': 5 * MM}}),
     'gap_close': ('틈새 닫힘', {'shape': {'gap0': 2 * MM, 'gap1': 2 * MM}, 'heat': {'gap_close': 1.5 * MM}}),
+    'web_square': ('웹 직각도 (코너 필릿)', {'shape': {'web_square': 3 * DEG}}),
     'residual': ('잔류 변형 (다음 패스)', {'prior': {'base_angle': 3 * DEG, 'web_tilt': 2 * DEG, 'bow': 3 * MM},
                                        'pass_index': 1}),
 }
@@ -570,12 +611,22 @@ _SINGLE_KEEP = {
     'web_tilt': [('heat', 'web_tilt'), ('heat', 'length')],
     'bow': [('heat', 'bow')],
     'gap_close': [('shape', 'gap0'), ('shape', 'gap1'), ('heat', 'gap_close')],
+    'web_square': [('shape', 'web_square')],
 }
+
+# 설정에 범위가 있어야 쓰는 단독 오차 (그 시편군에만 있는 오차)
+_SINGLE_NEEDS = {'web_square': ('pre_weld', 'web_square_deg')}
+
+
+def single_names(cfg: dict) -> list[str]:
+    """이 config(시편군)에서 쓸 단독 오차 이름 (SINGLE_ERRORS 순서). T 필릿은 13종, 코너 필릿은 웹 직각도를 더해 14종."""
+    return [n for n in SINGLE_ERRORS
+            if n not in _SINGLE_NEEDS or cfg.get(_SINGLE_NEEDS[n][0], {}).get(_SINGLE_NEEDS[n][1], 0)]
 
 # 가혹 묶음에서 크기를 키울 범위 (개수·확률·주기·구간 길이는 그대로)
 _SCALE_KEYS = {
     'pre_weld': ('place_xyz_mm', 'place_rpy_deg', 'icp_xyz_mm', 'icp_rot_deg', 'web_bow_mm_per_m', 'web_wave_mm',
-                 'base_bow_mm_per_m', 'base_wave_mm', 'gap_mm', 'gap_taper_mm', 'tack_height_mm'),
+                 'base_bow_mm_per_m', 'base_wave_mm', 'gap_mm', 'gap_taper_mm', 'tack_height_mm', 'web_square_deg'),
     'in_weld': ('drift_mm', 'jump_mm', 'base_angle_deg', 'web_tilt_deg', 'bow_mm', 'gap_close_mm'),
 }
 
@@ -585,6 +636,8 @@ def scale_cfg(cfg: dict, k: float) -> dict:
     c = copy.deepcopy(cfg)
     for sec, keys in _SCALE_KEYS.items():
         for key in keys:
+            if key not in c[sec]:
+                continue
             v = c[sec][key]
             c[sec][key] = [x * k for x in v] if isinstance(v, (list, tuple)) else v * k
     return c
@@ -592,6 +645,8 @@ def scale_cfg(cfg: dict, k: float) -> dict:
 
 def single_in_range(cfg: dict, name: str, rng: np.random.Generator, seed=None) -> dict:
     """오차 하나만 범위 안에서 뽑은 시나리오 (단독 묶음). 센서 노이즈·실패는 설정값 그대로."""
+    if name not in single_names(cfg) and name in SINGLE_ERRORS and name != 'residual':
+        raise ValueError(f'이 시편군 config에는 {name} 범위가 없음 ({".".join(_SINGLE_NEEDS[name])})')
     c = copy.deepcopy(cfg)
     c['in_weld']['drift_prob'] = c['in_weld']['jump_prob'] = 1.0   # 밀림·튐 단독은 반드시 생기게
     src = sample_scenario(c, rng, seed=seed)
