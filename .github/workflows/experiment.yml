@@ -4,38 +4,49 @@ name: Experiment (kinematic gen + BC train + eval)
 # Actions 탭의 "Run workflow"에서 브랜치를 골라 손으로 돌린다.
 # 한 번에 러너 약 5시간분을 쓰므로 push마다 돌지 않게 했다.
 # 결과: 실행 요약(Summary)의 표, 그리고 eval-* 아티팩트(eval.json).
-# 지금 실험: 시편군 (T 필릿, ㄱ자 코너 필릿). 정책을 T만 / 코너만 / 둘 다로 학습하고 두 군 시험에서 본다
-#   (한 정책이 두 군을 덮는지, T 정책이 코너로 옮겨 가는지). mlp_both242 = 둘 다 섞되 학습 수 242 (수량 대조).
-#   모두 용접 전 시작 구간 스캔 있음.
-#   이전 실험(시작 구간 스캔 있음/없음)은 PR #21 때 이 파일의 git 기록에 있다.
+# 지금 실험: 맞대기 V홈 추가 (T 필릿, ㄱ자 코너 필릿, 맞대기 V홈). 공용 MLP 하나(사용자 결정)에 V홈을 넣는다.
+#   mlp_all = 세 군 모두 (공용 정책), mlp_tc = T+코너만 (V홈으로 옮겨 가는지), mlp_butt = V홈만,
+#   mlp_all487 = 세 군 섞되 학습 수를 T+코너와 같게 487 (V홈을 넣어서 필릿이 나빠지는지 수량 대조), gru_all, rule.
+#   모두 용접 전 시작 구간 스캔 있음. 단면 센서는 판 윗면으로 V홈 단차를 재서 좌우를 고친다 (no_hilo = 단차 자체를 끄는 대조).
+#   이전 실험: 시작 구간 스캔 있음/없음 (PR #21), T/코너 교차 학습 (PR #23) 은 이 파일의 git 기록에 있다.
 
 on:
   workflow_dispatch:
     inputs:
       scale:
-        description: '묶음 개수 배율 (1.0 = 시편군마다 사양 수량, T 330 · 코너 335)'
+        description: '묶음 개수 배율 (1.0 = 시편군마다 사양 수량, T 330 · 코너 335 · V홈 335)'
         default: '1.0'
+      no_hilo:
+        description: '맞대기 단차를 끔 (대조 실험: 필릿 좌우가 나빠진 원인 확인)'
+        type: boolean
+        default: false
 
 env:
   SCALE: ${{ github.event.inputs.scale || '1.0' }}
-  SHARDS: 6
+  SHARDS: 8
 
 jobs:
   generate:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install numpy pyyaml
-      - name: Make batches (T + corner) and pick this shard
+      - name: Make batches (T + corner + butt V) and pick this shard
         run: |
           python -m sim_errors.make_scenarios --batch --scale "$SCALE" --out batch_all
           python -m sim_errors.make_scenarios --batch --scale "$SCALE" --family fillet_corner --out batch_all
+          CFG=sim_errors/config/part_errors.yaml
+          if [ "${{ github.event.inputs.no_hilo }}" = "true" ]; then
+            python -c "import yaml; c = yaml.safe_load(open('$CFG', encoding='utf-8')); c['families']['butt_v']['pre_weld']['hi_lo_mm'] = 0; yaml.safe_dump(c, open('cfg_nohilo.yaml', 'w', encoding='utf-8'), allow_unicode=True)"
+            CFG=cfg_nohilo.yaml
+          fi
+          python -m sim_errors.make_scenarios --config "$CFG" --batch --scale "$SCALE" --family butt_v --out batch_all
           mkdir -p batch
           ls batch_all/*.json | sort | awk -v n="$SHARDS" -v k=${{ matrix.shard }} 'NR % n == k' | xargs -I{} cp {} batch/
           ls batch | wc -l
@@ -63,17 +74,16 @@ jobs:
           pattern: episodes-*
           path: episodes
           merge-multiple: true
-      - name: Convert (both families in one dataset)
+      - name: Convert (all families in one dataset)
         run: python -m learning.to_lerobot episodes --out data --no-lerobot
-      - name: Train (T only, corner only, both)
+      - name: Train (all, T+corner, butt only)
         run: |
-          for m in mlp gru; do
-            python -m learning.train_bc data --model $m --family fillet_t --out runs/${m}_t
-            python -m learning.train_bc data --model $m --family fillet_corner --out runs/${m}_corner
-            python -m learning.train_bc data --model $m --out runs/${m}_both
-          done
-          # 수량 대조: 둘 다 섞되 학습 수를 한 군과 같게(242). 섞인 효과와 수량 효과를 가른다
-          python -m learning.train_bc data --model mlp --max-train 242 --out runs/mlp_both242
+          python -m learning.train_bc data --model mlp --out runs/mlp_all
+          python -m learning.train_bc data --model gru --out runs/gru_all
+          python -m learning.train_bc data --model mlp --family fillet_t,fillet_corner --out runs/mlp_tc
+          python -m learning.train_bc data --model mlp --family butt_v --out runs/mlp_butt
+          # 수량 대조: 세 군 섞되 학습 수를 T+코너와 같게(487). V홈을 넣은 효과와 수량 효과를 가른다
+          python -m learning.train_bc data --model mlp --max-train 487 --out runs/mlp_all487
       - uses: actions/upload-artifact@v4
         with:
           name: runs
@@ -87,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        policy: [mlp_t, mlp_corner, mlp_both, mlp_both242, gru_t, gru_corner, gru_both, rule]
+        policy: [mlp_all, mlp_tc, mlp_butt, mlp_all487, gru_all, rule]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -105,7 +115,7 @@ jobs:
         with:
           name: runs
           path: .
-      - name: Closed-loop evaluation (T and corner test sets)
+      - name: Closed-loop evaluation (T, corner, butt V test sets)
         run: |
           p=${{ matrix.policy }}
           if [ "$p" = rule ]; then
@@ -137,8 +147,8 @@ jobs:
       - name: Summary table
         run: |
           {
-            for f in fillet_corner fillet_t; do
-              name=$([ $f = fillet_t ] && echo "T 필릿" || echo "코너 필릿")
+            for f in butt_v fillet_t fillet_corner; do
+              case $f in fillet_t) name="T 필릿";; fillet_corner) name="코너 필릿";; *) name="맞대기 V홈";; esac
               echo "## ${name} 시험 (전체)"
               python -m learning.report_evals out/*/eval.json --kind fam_$f
               echo

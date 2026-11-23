@@ -108,3 +108,20 @@ families:
       base_angle_deg: [0.5, 2.5]   # 날개 한쪽만 있어 구속이 약함
     episode:
       counts: {single: 70}    # 단독 = 오차 14종(웹 직각도 포함) × 5
+  butt_v:                  # 맞대기 V홈 (아래보기 1G, 루트 패스만). 두 판이 홈을 사이에 두고 같은 평면에 눕는다.
+    geometry:              #   poscoenc에 평판 맞대기 시편이 없어 흔한 값으로 가정 (관 시편 두께 12 mm와 같게)
+      length_mm: 300
+      plate_width_mm: 150  # 판 하나의 폭 (이음매에서 바깥까지)
+      thickness_mm: 12
+      bevel_deg: 30        # 개선 각 (한쪽, 연직에서). 홈 각 60°
+      root_face_mm: 1.5    # 루트 면 높이
+    pre_weld:
+      gap_mm: [1.0, 3.0]   # 루트 틈새: 맞대기 루트 패스는 틈새를 두고 조립한다
+      web_bow_mm_per_m: 2.0   # 맞대기에서는 이음선 좌우 직진도 (두 판 끝 맞춤)
+      hi_lo_mm: 1.0        # 단차: 오른쪽 판이 왼쪽보다 높은 양, ± (맞대기만)
+    in_weld:
+      base_angle_deg: [0.5, 2.5]   # 맞대기에서는 양쪽 판 각변형 (날개가 같이 들림). 이등분선은 그대로
+      web_tilt_deg: 1.0            # 맞대기에서는 좌우 판 각변형 차이 (오른쪽 - 왼쪽), ±. 작업각 = 절반
+      gap_close_mm: [0.0, 1.5]     # 가로 수축으로 아크 앞 틈새가 필릿보다 더 닫힌다고 가정
+    episode:
+      counts: {single: 70}    # 단독 = 오차 14종(단차 포함) × 5
