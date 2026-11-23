@@ -44,7 +44,7 @@ def failed_episodes(ep_dir: str) -> dict[str, str]:
     return {e['file']: e.get('reason', '') for e in rep.get('episodes', []) if not e.get('ok', False)}
 
 
-TASK_NAMES = {'fillet_t': 'T fillet', 'fillet_corner': 'corner fillet', 'butt_v': 'butt V-groove'}
+TASK_NAMES = {'fillet_t': 'T fillet', 'fillet_corner': 'corner fillet', 'butt_v': 'butt V-groove', 'pipe_girth': 'pipe girth'}
 
 
 def convert(ep_dir, out: str, lerobot: bool = True, fps: int = FPS, prescan: bool = True) -> dict:

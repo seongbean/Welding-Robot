@@ -10,9 +10,10 @@
   python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches/t_small/   # 수량 1/5로 먼저 한 바퀴
   python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches/corner/   # ㄱ자 코너 필릿
   python -m sim_errors.make_scenarios --batch --family butt_v --out batches/butt/           # 맞대기 V홈
+  python -m sim_errors.make_scenarios --batch --family pipe_girth --out batches/pipe/       # 파이프 원주
 
 --family는 config families 섹션의 시편군을 고른다 (기본 = geometry.joint, 지금은 fillet_t).
-T 필릿이 아닌 시편군의 묶음 파일 이름에는 군 머리말(corner_, butt_)이 붙어, 여러 군 에피소드를 한 폴더에 섞어도
+T 필릿이 아닌 시편군의 묶음 파일 이름에는 군 머리말(corner_, butt_, pipe_)이 붙어, 여러 군 에피소드를 한 폴더에 섞어도
 이름이 겹치지 않는다. 같은 --seed라도 시편군마다 다른 오차를 뽑는다.
 
 학습용 묶음(--batch)은 config episode 섹션의 개수로 시나리오를 만들고, 각 시나리오에 episode 설정
@@ -34,8 +35,8 @@ from .part_errors import (JOINTS, KINDS, SINGLE_ERRORS, episode_meta, family_cfg
                           save_scenario, scale_cfg, signature, single_error, single_in_range, single_names, summarize, zero_errors)
 
 # 시편군 → 묶음 파일 머리말, 난수 열쇠 (T 필릿은 예전과 같은 이름·난수를 유지)
-FAMILY_PREFIX = {'fillet_t': '', 'fillet_corner': 'corner_', 'butt_v': 'butt_'}
-FAMILY_KEY = {'fillet_t': (), 'fillet_corner': (1,), 'butt_v': (2,)}
+FAMILY_PREFIX = {'fillet_t': '', 'fillet_corner': 'corner_', 'butt_v': 'butt_', 'pipe_girth': 'pipe_'}
+FAMILY_KEY = {'fillet_t': (), 'fillet_corner': (1,), 'butt_v': (2,), 'pipe_girth': (3,)}
 
 DEFAULT_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'part_errors.yaml')
 
