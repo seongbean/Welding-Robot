@@ -146,7 +146,7 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
     model = PartErrorModel(scn)
     T_home = kin.fk(home_q).homogeneous
     if not use_scenario_pose:
-        model.set_nominal(auto_nominal(T_home, model.L))
+        model.set_nominal(auto_nominal(T_home, model.L, mid_part=model.nominal(0.5)[0][0]))
     expert = ScriptedExpert(model, T_home, np.random.default_rng(sensor_seed))
     rec = Recorder()
     bad, q_seam0 = check_reach(kin, expert, home_q, stepper.accept)

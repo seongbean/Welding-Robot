@@ -190,12 +190,14 @@ class ScriptedExpert:
         return self.phase == 'done'
 
 
-def auto_nominal(T_tip: np.ndarray, length: float, drop: float = 0.02) -> np.ndarray:
+def auto_nominal(T_tip: np.ndarray, length: float, drop: float = 0.02, mid_part=None) -> np.ndarray:
     """시작 자세의 토치 팁 근처에 모재를 둔다: 이음매 중간 = 팁 아래 drop, 이음매 방향 = 베이스 -Y,
-    웹 판은 로봇 반대쪽(+X)에 서서 토치가 로봇 쪽에서 접근한다. 모재 좌표계 x=-Y, y=+X, z=+Z."""
+    웹 판은 로봇 반대쪽(+X)에 서서 토치가 로봇 쪽에서 접근한다. 모재 좌표계 x=-Y, y=+X, z=+Z.
+    mid_part: 모재 좌표계의 이음매 중간 점 (없으면 직선 이음매 (length/2, 0, 0). 파이프는 PartErrorModel.nominal(0.5))."""
     R = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     mid = np.asarray(T_tip[:3, 3], dtype=float) - np.array([0.0, 0.0, drop])
     T = np.eye(4)
     T[:3, :3] = R
-    T[:3, 3] = mid - R[:, 0] * length / 2
+    mp = np.array([length / 2, 0.0, 0.0]) if mid_part is None else np.asarray(mid_part, dtype=float)
+    T[:3, 3] = mid - R @ mp
     return T

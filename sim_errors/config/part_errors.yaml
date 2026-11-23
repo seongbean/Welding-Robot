@@ -125,3 +125,29 @@ families:
       gap_close_mm: [0.0, 1.5]     # 가로 수축으로 아크 앞 틈새가 필릿보다 더 닫힌다고 가정
     episode:
       counts: {single: 70}    # 단독 = 오차 14종(단차 포함) × 5
+  pipe_girth:              # 파이프 원주 (축을 눕힌 두 관 맞대기, 꼭대기를 가운데로 한 원호 구간, 루트 패스만).
+    geometry:              #   12인치 관(바깥지름 323.9) 두께 12, API 1104 흔한 개선(30°, 루트 면 1.6 근처). 모두 가정치
+      pipe_od_mm: 323.9    # 바깥지름. 루트 반지름 = 바깥 반지름 - (두께 - 루트 면) = 151.45
+      thickness_mm: 12
+      bevel_deg: 30
+      root_face_mm: 1.5
+      arc_deg: 100         # 용접 구간: 꼭대기 ±50° (위치는 아래보기 → 비스듬, 포지셔너 없음). 호 길이 264 mm
+      pipe_length_mm: 150  # 관 하나의 축 방향 길이 (표시용)
+    nominal_pose:          # 모재 원점 = 이음매 평면의 관 축. x_part = -Y (꼭대기 접선), y_part = +X (관 축이 로봇 반대쪽으로)
+      xyz_mm: [500, 0, -50]
+      rpy_deg: [0, 0, -90]
+    pre_weld:
+      gap_mm: [2.0, 4.0]   # 에피소드 생성 사양: 관 루트 틈새 2~4 mm (poscoenc 11.5 mm는 시연값)
+      gap_taper_mm: 0.5
+      web_bow_mm_per_m: 2.0   # 파이프에서는 이음선 축 방향 흔들림 (관 끝 직각도·맞춤)
+      base_bow_mm_per_m: 0.0  # 반지름 방향은 진원도(oval_mm)로 따로 둔다
+      oval_mm: 1.0         # 진원도: 관마다 반지름 편차 진폭 ±, 위상 랜덤 (cos 2ψ). 두 관 차이는 둘레 따라 변하는 단차
+      hi_lo_mm: 0.8        # 일정한 단차 (두께·지름 차이), ±. 진원도 차이 단차와 합쳐 최대 약 2.8 mm
+    in_weld:
+      drift_mm: [0.0, 2.0]    # 관은 맞춤 클램프로 잡혀 판보다 덜 밀린다고 가정
+      base_angle_deg: [0.5, 2.0]
+      web_tilt_deg: 1.0
+      bow_mm: 0.5             # 파이프에서는 아크 뒤 반지름 방향 수축 (작게)
+      gap_close_mm: [0.0, 1.5]
+    episode:
+      counts: {single: 75}    # 단독 = 오차 15종(단차·진원도 포함) × 5

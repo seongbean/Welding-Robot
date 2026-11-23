@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import os
@@ -16,7 +17,7 @@ import sys
 AXES = ('lateral', 'height', 'work', 'travel')
 
 
-SHORT = {'fillet_t': 'T', 'fillet_corner': '코너', 'butt_v': 'V홈'}
+SHORT = {'fillet_t': 'T', 'fillet_corner': '코너', 'butt_v': 'V홈', 'pipe_girth': '파이프'}
 
 
 def short(fam: str) -> str:
@@ -69,7 +70,8 @@ def main(argv=None):
     ap.add_argument('evals', nargs='+')
     ap.add_argument('--kind', default='all', help='강도 (all, mixed, single, clean, hard) 또는 시편군 fam_<군>, fam_<군>_<강도>')
     args = ap.parse_args(argv)
-    print(table(sorted(args.evals), args.kind))
+    files = sorted({f for e in args.evals for f in (glob.glob(e) or [e])})   # Windows cmd는 *를 풀지 않음
+    print(table(files, args.kind))
 
 
 if __name__ == '__main__':
