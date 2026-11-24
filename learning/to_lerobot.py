@@ -5,6 +5,7 @@
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small --no-lerobot   # frames.npz만
   python -m learning.to_lerobot episodes/t episodes/corner --out datasets/t_corner     # 여러 시편군을 한 데이터로
+  python -m learning.to_lerobot --exp 20251201-weave --no-lerobot   # <실험>/episodes → <실험>/data
 
 - 관측·행동 정의는 learning/features.py (관측 61개, 행동 7개).
 - 묶음 실행 보고서(<에피소드 폴더>/batch_report.json)가 있으면 점검에 실패한 에피소드는 뺀다.
@@ -31,6 +32,8 @@ import shutil
 import sys
 
 import numpy as np
+
+from common import paths
 
 from .features import ACTION_NAMES, FPS, OBS_NAMES, episode_frames, load_episode
 
@@ -133,13 +136,22 @@ def main(argv=None):
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('episodes', nargs='+', help='에피소드 .npz 폴더 (run_batch.py 출력), 여러 개면 합침')
-    ap.add_argument('--out', required=True)
+    ap.add_argument('episodes', nargs='*', help='에피소드 .npz 폴더 (run_batch.py 출력), 여러 개면 합침 '
+                                                '(--exp면 기본 <실험>/episodes)')
+    ap.add_argument('--out', help='출력 폴더 (--exp면 기본 <실험>/data)')
     ap.add_argument('--no-lerobot', action='store_true')
     ap.add_argument('--fps', type=int, default=FPS)
     ap.add_argument('--no-prescan', action='store_true',
                     help='용접 전 시작 구간 스캔을 버퍼에 넣지 않음 (스캔 효과 비교용)')
+    paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
+    if args.exp:
+        args.episodes = args.episodes or [str(paths.exp_dir(args.exp, 'episodes'))]
+        args.out = args.out or str(paths.exp_dir(args.exp, 'data'))
+    if not args.episodes or not args.out:
+        ap.error('에피소드 폴더와 --out이 필요합니다 (또는 --exp)')
+    paths.record_stage(args.exp, 'to_lerobot', episodes=args.episodes, out=args.out, fps=args.fps,
+                       prescan=not args.no_prescan, lerobot=not args.no_lerobot)
     r = convert(args.episodes, args.out, not args.no_lerobot, args.fps, not args.no_prescan)
     print(f'에피소드 {r["episodes"]}개, 프레임 {r["frames"]}개 ({args.fps} Hz), '
           f'시작 구간 스캔 {"있음" if r["prescan"] else "없음"}, 시편군 {", ".join(r["families"])} '

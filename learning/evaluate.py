@@ -4,6 +4,7 @@
 사용법 (저장소 루트에서)
   python -m learning.evaluate runs/mlp_full/policy.pt --data datasets/t_small --episodes episodes/t_small
   python -m learning.evaluate runs/*/policy.pt --data datasets/t_small --episodes episodes/t_small   # 여러 정책 비교
+  python -m learning.evaluate mlp_all rule --exp 20251201-weave --jobs 8   # <실험>/runs/<이름>/policy.pt, <실험>/data, <실험>/episodes
   python -m learning.evaluate runs/mlp_t/policy.pt --data datasets/t_corner --episodes episodes/t episodes/corner \
       --family fillet_corner --name corner        # T로 학습한 정책을 코너 시험에서 (→ runs/mlp_t/eval_corner.json)
 
@@ -32,6 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
+from common import paths
 from sim_errors.expert import ScriptedExpert
 from sim_errors.part_errors import DEG, MM, PartErrorModel, rotvec_to_R
 
@@ -331,14 +333,27 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('policies', nargs='+',
                     help="train_bc.py가 만든 policy.pt, 또는 규칙 기준선 'rule' (시작 구간 스캔 있음) / 'rule-noprescan'")
-    ap.add_argument('--data', required=True, help='to_lerobot.py 출력 폴더')
+    ap.add_argument('--data', help='to_lerobot.py 출력 폴더 (--exp면 기본 <실험>/data)')
     ap.add_argument('--episodes', nargs='+', help='에피소드 .npz 폴더 (닫힌 루프 평가용 시나리오), 여러 개 가능')
     ap.add_argument('--family', help='이 시편군 시험만 평가 (쉼표로 여러 개)')
     ap.add_argument('--name', help='결과 파일 이름 eval_<name>.json (기본 eval.json)')
     ap.add_argument('--splits', default='test', help='평가할 나눔 (쉼표로, 예: test,val)')
     ap.add_argument('--jobs', type=int, default=1, help='닫힌 루프 병렬 프로세스 수')
-    ap.add_argument('--rule-dir', default='runs', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json)')
+    ap.add_argument('--rule-dir', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json). 기본 runs, --exp면 <실험>/runs')
+    paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
+    if args.exp:
+        runs = paths.exp_dir(args.exp, 'runs')
+        args.data = args.data or str(paths.exp_dir(args.exp, 'data'))
+        args.episodes = args.episodes or [str(paths.exp_dir(args.exp, 'episodes'))]
+        args.rule_dir = args.rule_dir or str(runs)
+        # 경로가 아닌 정책 이름(예: mlp_all)은 <실험>/runs/<이름>/policy.pt
+        args.policies = [p if p in RULES or os.path.exists(p) else str(runs / p / 'policy.pt') for p in args.policies]
+    args.rule_dir = args.rule_dir or 'runs'
+    if not args.data:
+        ap.error('--data가 필요합니다 (또는 --exp)')
+    paths.record_stage(args.exp, 'evaluate', policies=args.policies, data=args.data, episodes=args.episodes,
+                       family=args.family, splits=args.splits, name=args.name)
     for p in args.policies:
         evaluate(p, args.data, args.episodes, tuple(args.splits.split(',')), jobs=args.jobs, rule_dir=args.rule_dir,
                  families=args.family.split(',') if args.family else None, name=args.name)

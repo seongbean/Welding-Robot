@@ -28,6 +28,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from common import paths
+
 from .features import ACTION_NAMES, GROUPS
 
 DEFAULT_GROUPS = ('section', 'profile', 'progress', 'mode')
@@ -241,8 +243,9 @@ def main(argv=None):
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('data', help='to_lerobot.py 출력 폴더 (frames.npz)')
-    ap.add_argument('--out', required=True)
+    ap.add_argument('data', nargs='?', help='to_lerobot.py 출력 폴더 (frames.npz). --exp면 기본 <실험>/data')
+    ap.add_argument('--out', help='출력 폴더 (--exp면 기본 <실험>/runs/<--run>)')
+    ap.add_argument('--run', help='--exp일 때 정책 이름 (runs 아래 폴더, 예: mlp_all)')
     ap.add_argument('--model', choices=('mlp', 'gru'), default='mlp')
     ap.add_argument('--obs', default=','.join(DEFAULT_GROUPS), help=f'입력 묶음 ({", ".join(GROUPS)})')
     ap.add_argument('--epochs', type=int, default=40)
@@ -254,7 +257,17 @@ def main(argv=None):
     ap.add_argument('--max-train', type=int, help='학습 에피소드 N개만 (강도별 비율 유지)')
     ap.add_argument('--no-perturb', action='store_true', help='섭동 에피소드를 학습에서 뺌')
     ap.add_argument('--family', help='이 시편군만 학습 (쉼표로 여러 개, 예: fillet_t). 기본 = 데이터 전부')
+    paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
+    if args.exp:
+        args.data = args.data or str(paths.exp_dir(args.exp, 'data'))
+        if not args.out and args.run:
+            args.out = str(paths.exp_dir(args.exp, 'runs') / args.run)
+    if not args.data or not args.out:
+        ap.error('데이터 폴더와 --out이 필요합니다 (또는 --exp와 --run)')
+    paths.record_stage(args.exp, 'train_bc', data=args.data, out=args.out, model=args.model, obs=args.obs,
+                       epochs=args.epochs, seed=args.seed, max_train=args.max_train, no_perturb=args.no_perturb,
+                       family=args.family)
     r = train(args.data, args.out, args.model, args.obs.split(','), args.epochs, args.seq, args.hidden, args.layers,
               args.lr, seed=args.seed, max_train=args.max_train, no_perturb=args.no_perturb,
               families=args.family.split(',') if args.family else None)

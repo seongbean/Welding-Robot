@@ -25,16 +25,29 @@ outputs/
 - 하위 폴더 이름은 `learning/run_experiment.py`가 이미 쓰는 배치(`data/`, `runs/`, `report.md`)와 같습니다.
   한 실험에 변형이 여럿이면 `episodes_prof/`, `data_prof/`처럼 접미사를 붙입니다.
 
-## 지금 쓰는 법
+## 쓰는 법: --exp
 
-지금은 각 명령의 `--out`에 위 경로를 직접 줍니다 (`--exp` 옵션은 다음 단계에서 추가).
+명령마다 `--exp <실험 ID>`를 주면 입력·출력 경로를 위 배치에서 채우고, 실험 폴더의 `manifest.json`에
+단계(시각, git 커밋·변경 여부, 명령줄, 설정 해시, 시드 등)를 덧붙입니다. 경로를 따로 주면(`--out`, `--data` 등)
+그 경로가 우선합니다. `--exp`를 주지 않으면 예전과 똑같이 동작하고 manifest도 쓰지 않습니다.
 
 ```bash
-E=outputs/experiments/20251201-weave
-python -m sim_errors.make_scenarios --batch --scale 0.2 --out $E/batch
-python sim_bridge/run_batch.py $E/batch --out $E/episodes --kinematic --jobs 4
-python -m learning.run_experiment --episodes $E/episodes --out $E --jobs 8
+E=20251201-weave
+python -m sim_errors.make_scenarios --batch --scale 0.2 --exp $E          # → batch/
+python sim_bridge/run_batch.py --exp $E --kinematic --jobs 4                # batch/ → episodes/
+python sim_bridge/run_batch.py --exp $E --reach-only --follower-urdf ...   # batch/ → reach/
+python sim_bridge/run_batch.py --exp $E --group butt --only butt_ --follower-urdf ...   # Isaac → episodes_isaac/butt/
+python -m learning.to_lerobot --exp $E --no-lerobot                         # episodes/ → data/
+python -m learning.train_bc --exp $E --run mlp_all                          # data/ → runs/mlp_all/
+python -m learning.evaluate mlp_all rule --exp $E --jobs 8                  # runs/<이름>/eval.json
+python -m learning.run_experiment --exp $E --jobs 8                         # 변환·학습·평가·report.md 한 번에
 ```
+
+- `run_batch.py --exp`: 시나리오 폴더 기본값은 `batch/`. 출력은 `--kinematic`이면 `episodes/`, `--reach-only`면
+  `reach/`, Isaac이면 `episodes_isaac/<--group>/`(기본 `all`).
+- `train_bc --exp`는 `--run <정책 이름>`이 있어야 출력 폴더를 정합니다.
+- `evaluate --exp`에서 경로가 아닌 정책 이름(`mlp_all`)은 `runs/<이름>/policy.pt`, 규칙 기준선(`rule`)은 `runs/rule/`.
+- `run_experiment --exp`는 하위 단계에도 `--exp`를 넘겨 같은 manifest에 기록합니다.
 
 ## git에 넣는 것과 넣지 않는 것
 
