@@ -11,6 +11,7 @@
   python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches/corner/   # ㄱ자 코너 필릿
   python -m sim_errors.make_scenarios --batch --family butt_v --out batches/butt/           # 맞대기 V홈
   python -m sim_errors.make_scenarios --batch --family pipe_girth --out batches/pipe/       # 파이프 원주
+  python -m sim_errors.make_scenarios --batch --scale 0.2 --exp 20251201-weave             # → outputs/experiments/<ID>/batch
 
 --family는 config families 섹션의 시편군을 고른다 (기본 = geometry.joint, 지금은 fillet_t).
 T 필릿이 아닌 시편군의 묶음 파일 이름에는 군 머리말(corner_, butt_, pipe_)이 붙어, 여러 군 에피소드를 한 폴더에 섞어도
@@ -30,6 +31,8 @@ import sys
 
 import numpy as np
 import yaml
+
+from common import paths
 
 from .part_errors import (JOINTS, KINDS, SINGLE_ERRORS, episode_meta, family_cfg, next_pass, sample_scenario,
                           save_scenario, scale_cfg, signature, single_error, single_in_range, single_names, summarize, zero_errors)
@@ -53,13 +56,21 @@ def main(argv=None):
     ap.add_argument('--n', type=int, default=10, help='시나리오(모재) 개수')
     ap.add_argument('--passes', type=int, default=1, help='모재당 패스 수 (2 이상이면 잔류 변형을 다음 패스로 넘김)')
     ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--out', default='scenarios')
+    ap.add_argument('--out', help='출력 폴더 (기본: --exp면 <실험>/batch, 아니면 scenarios)')
     ap.add_argument('--summary-only', action='store_true', help='파일을 쓰지 않고 분포 요약만')
     ap.add_argument('--single', help=f'단독 검증 시나리오: all 또는 쉼표로 ({", ".join(SINGLE_ERRORS)})')
     ap.add_argument('--batch', action='store_true', help='학습용 묶음 (config episode 섹션)')
     ap.add_argument('--scale', type=float, default=1.0, help='--batch 개수 배율 (예: 0.2 = 1/5)')
     ap.add_argument('--counts', help='--batch 개수 직접 지정 clean,single,mixed,hard (예: 4,13,20,4)')
+    paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
+    if not args.out:
+        args.out = str(paths.exp_dir(args.exp, 'batch')) if args.exp else 'scenarios'
+    if not args.summary_only:
+        paths.record_stage(args.exp, 'make_scenarios', out=args.out, config=args.config,
+                           config_sha256=paths.file_sha256(args.config), family=args.family, seed=args.seed,
+                           batch=args.batch, scale=args.scale, counts=args.counts, single=args.single, n=args.n,
+                           passes=args.passes)
 
     with open(args.config, encoding='utf-8') as f:
         cfg = family_cfg(yaml.safe_load(f), args.family)

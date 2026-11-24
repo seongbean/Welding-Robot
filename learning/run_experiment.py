@@ -5,6 +5,7 @@ GitHub Actions를 못 쓸 때 PC(Windows 포함)에서 쓰려고 만들었다. �
 
 사용법 (저장소 루트에서)
   python -m learning.run_experiment --episodes exp/episodes --out exp --jobs 8
+  python -m learning.run_experiment --exp 20251123-kin-4fam --jobs 8   # outputs/experiments/<ID>/episodes → 같은 폴더
 
 - 변환: exp/data (episodes/batch_report.json에서 점검 실패한 에피소드는 뺌)
 - 학습: mlp_all(네 군), mlp_3(T+코너+V홈), mlp_pipe(파이프만), mlp_all_q(네 군, 학습 수를 mlp_3과 같게), gru_all
@@ -20,6 +21,8 @@ import json
 import os
 import subprocess
 import sys
+
+from common import paths
 
 FAMILIES = [('pipe_girth', '파이프 원주'), ('fillet_t', 'T 필릿'), ('fillet_corner', '코너 필릿'), ('butt_v', '맞대기 V홈')]
 TRAIN = [('mlp_all', ['--model', 'mlp']),
@@ -41,13 +44,21 @@ def main():
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--episodes', required=True, help='에피소드 .npz 폴더 (batch_report.json 포함)')
-    ap.add_argument('--out', required=True, help='결과 폴더 (data, runs, report.md)')
+    ap.add_argument('--episodes', help='에피소드 .npz 폴더 (batch_report.json 포함). --exp면 기본 <실험>/episodes')
+    ap.add_argument('--out', help='결과 폴더 (data, runs, report.md). --exp면 기본 <실험>')
     ap.add_argument('--jobs', type=int, default=4, help='평가 병렬 프로세스 수 (CPU 코어 수 정도)')
+    paths.add_exp_arg(ap)
     a = ap.parse_args()
+    if a.exp:
+        a.episodes = a.episodes or str(paths.exp_dir(a.exp, 'episodes'))
+        a.out = a.out or str(paths.exp_dir(a.exp))
+    if not a.episodes or not a.out:
+        ap.error('--episodes와 --out이 필요합니다 (또는 --exp)')
+    exp = ['--exp', a.exp] if a.exp else []   # 하위 단계도 같은 manifest에 기록 (경로는 아래에서 직접 줌)
+    paths.record_stage(a.exp, 'run_experiment', episodes=a.episodes, out=a.out, policies=[t[0] for t in TRAIN])
     data, runs = os.path.join(a.out, 'data'), os.path.join(a.out, 'runs')
     if not os.path.isdir(data):
-        run(['learning.to_lerobot', a.episodes, '--out', data, '--no-lerobot'])
+        run(['learning.to_lerobot', a.episodes, '--out', data, '--no-lerobot', *exp])
     for name, extra in TRAIN:
         out = os.path.join(runs, name)
         if os.path.isfile(os.path.join(out, 'train_log.json')):
@@ -55,14 +66,14 @@ def main():
         if extra is None:
             with open(os.path.join(runs, 'mlp_3', 'train_log.json'), encoding='utf-8') as f:
                 extra = ['--model', 'mlp', '--max-train', str(json.load(f)['train_episodes'])]
-        run(['learning.train_bc', data, *extra, '--out', out])
+        run(['learning.train_bc', data, *extra, '--out', out, *exp])
     for name, _ in TRAIN:
         if not os.path.isfile(os.path.join(runs, name, 'eval.json')):
             run(['learning.evaluate', os.path.join(runs, name, 'policy.pt'), '--data', data,
-                 '--episodes', a.episodes, '--jobs', str(a.jobs)])
+                 '--episodes', a.episodes, '--jobs', str(a.jobs), *exp])
     if not os.path.isfile(os.path.join(runs, 'rule', 'eval.json')):
         run(['learning.evaluate', 'rule', '--data', data, '--episodes', a.episodes, '--jobs', str(a.jobs),
-             '--rule-dir', runs])
+             '--rule-dir', runs, *exp])
     from learning.report_evals import table
     evals = sorted(os.path.join(runs, n, 'eval.json') for n in [t[0] for t in TRAIN] + ['rule'])
     buf = io.StringIO()

@@ -32,6 +32,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+from common import paths  # noqa: E402
 from sim_errors.check_episode import FAIL, WARN, check, load, tracking_error  # noqa: E402
 from sim_errors.episode import run_kinematic  # noqa: E402
 from sim_errors.part_errors import DEG, MM, load_scenario  # noqa: E402
@@ -150,15 +151,33 @@ def reach_only(files: list[str], args) -> int:
     return 0 if all(r['ok'] for r in rows) else 1
 
 
-def main():
+def resolve_args(ap: argparse.ArgumentParser, args) -> None:
+    """--exp가 있으면 비어 있는 scenarios·--out을 실험 폴더 배치로 채운다. 없으면 둘 다 필수."""
+    if args.exp:
+        if not args.scenarios:
+            args.scenarios = str(paths.exp_dir(args.exp, 'batch'))
+        if not args.out:
+            if args.reach_only:
+                args.out = str(paths.exp_dir(args.exp, 'reach'))
+            elif args.kinematic:
+                args.out = str(paths.exp_dir(args.exp, 'episodes'))
+            else:
+                args.out = str(paths.exp_dir(args.exp, 'episodes_isaac') / args.group)
+    if not args.scenarios or not args.out:
+        ap.error('시나리오 폴더와 --out이 필요합니다 (또는 --exp)')
+
+
+def main(argv=None):
     for st in (sys.stdout, sys.stderr):
         try:
             st.reconfigure(encoding='utf-8')
         except Exception:
             pass
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('scenarios', help='make_scenarios --batch 출력 폴더')
-    ap.add_argument('--out', required=True, help='에피소드 .npz 폴더')
+    ap.add_argument('scenarios', nargs='?', help='make_scenarios --batch 출력 폴더 (--exp면 기본 <실험>/batch)')
+    ap.add_argument('--out', help='에피소드 .npz 폴더 (--exp면 기본: --kinematic → <실험>/episodes, '
+                                  '--reach-only → <실험>/reach, Isaac → <실험>/episodes_isaac/<--group>)')
+    ap.add_argument('--group', default='all', help='--exp + Isaac 실행일 때 episodes_isaac 아래 폴더 이름 (예: butt)')
     ap.add_argument('--follower-urdf', help='opti3.urdf 경로 (Isaac 실행)')
     ap.add_argument('--follower-config', default=os.path.join(REPO, 'weld_teleop', 'config', 'follower_opti3.yaml'))
     ap.add_argument('--home-q', default='0,-0.5236,1.7453,0,0.8727,0', help='receiver --initial-q와 같게')
@@ -172,7 +191,15 @@ def main():
     ap.add_argument('--report-only', action='store_true', help='실행 없이 있는 에피소드로 보고서만')
     ap.add_argument('--reach-only', action='store_true',
                     help='Isaac 없이 opti3 IK 도달만 점검 (--follower-urdf 필요). <out>/reach_report.json')
-    args = ap.parse_args()
+    paths.add_exp_arg(ap)
+    args = ap.parse_args(argv)
+    resolve_args(ap, args)
+    if not args.report_only:
+        paths.record_stage(args.exp, 'run_batch', scenarios=args.scenarios, out=args.out,
+                           runner='reach' if args.reach_only else 'kinematic' if args.kinematic else 'isaac',
+                           follower_urdf=args.follower_urdf, follower_config=args.follower_config,
+                           follower_config_sha256=paths.file_sha256(args.follower_config),
+                           only=args.only, limit=args.limit)
 
     files = sorted(glob.glob(os.path.join(args.scenarios, '*.json')))
     if args.only:

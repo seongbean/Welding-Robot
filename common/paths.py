@@ -13,7 +13,9 @@
 """
 from __future__ import annotations
 
+import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import platform
@@ -96,6 +98,35 @@ def resolve_out(out: str | os.PathLike | None, exp_id: str | None, part: str) ->
     if exp_id:
         return exp_dir(exp_id, part)
     raise ValueError('--out 또는 --exp 중 하나는 있어야 합니다')
+
+
+def add_exp_arg(ap: argparse.ArgumentParser) -> None:
+    """CLI에 --exp 옵션을 더한다. 주면 입력·출력 경로를 outputs/experiments/<ID>/ 배치에서 채운다."""
+    ap.add_argument('--exp', type=check_exp_id, metavar='YYYYMMDD-이름',
+                    help='실험 ID. 입력·출력 기본값을 outputs/experiments/<ID>/에서 채우고 manifest.json에 기록 '
+                         '(--out 등을 따로 주면 그 경로가 우선)')
+
+
+def file_sha256(path: str | os.PathLike) -> str | None:
+    """파일 내용 해시 (설정 파일 기록용). 없으면 None."""
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def record_stage(exp_id: str | None, stage: str, **extra) -> Path | None:
+    """--exp를 줬을 때만 실험 폴더의 manifest.json에 이번 단계를 기록한다 (단계 시작 시점).
+
+    extra의 경로 값은 문자열로 바꿔 적는다.
+    """
+    if not exp_id:
+        return None
+    clean = {k: (str(v) if isinstance(v, os.PathLike) else
+                 [str(x) for x in v] if isinstance(v, (list, tuple)) else v)
+             for k, v in extra.items() if v is not None}
+    return write_manifest(exp_dir(exp_id, create=True), stage, clean)
 
 
 def _git(*args: str) -> str | None:
