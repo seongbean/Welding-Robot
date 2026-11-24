@@ -20,4 +20,4 @@ jobs:
       - name: Lint
         run: ruff check --select E,F,W --ignore E501 .
       - name: Unit tests (ROS 불필요)
-        run: pytest weld_teleop/test sim_errors/test sim_bridge/test learning/test -v
+        run: pytest weld_teleop/test sim_errors/test sim_bridge/test learning/test common/test -v

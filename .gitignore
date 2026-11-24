@@ -5,9 +5,29 @@ __pycache__/
 build/
 install/
 log/
+
+# 실행 산출물: 모두 outputs/ 아래 (docs/outputs.md)
+outputs/
+
+# 가상환경
+.venv/
+venv/
+
+# 옛 산출물 경로. 로컬 이전(2026-11-25) 뒤에는 outputs/ 아래로 가는 정션이거나 빈 폴더.
+# 다른 작업이 새 규약으로 옮겨 오면 지운다.
 scenarios/
 episodes/
 scenarios_single/
 batches/
 datasets/
 runs/
+/exp
+/exp_isaac
+/github-evals
+# assets/isaac/opti3_welding_scene/로 옮기기 전 로컬 사본
+weld_teleop/opti3_welding_scene/
+
+# 소스 폴더에 큰 산출물이 실수로 들어가지 않게
+*.pt
+*.npz
+*.parquet
