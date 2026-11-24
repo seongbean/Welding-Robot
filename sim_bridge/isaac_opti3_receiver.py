@@ -1,7 +1,8 @@
 """Isaac Sim 쪽: UDP로 받은 관절 목표를 opti3(/World/indy)에 넣고 실측 관절값을 돌려보낸다.
 
 Isaac Sim 5.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으로 실행한다(추가 설치 없음).
-  C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd C:\\...\\opti3_welding_scene\\posco_torch.usd
+  C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py
+  (장면 기본값: assets/isaac/opti3_welding_scene/posco_torch.usd. 다른 장면은 --usd로)
 
 - 관절 drive 게인 기본 kp=1e5, kd=2e3 (장면 README의 1e4/1e3은 중력 처짐·지연으로 추종 오차 95%가 3 mm,
   1e5/2e3에서 0.65 mm로 검증됨).
@@ -33,8 +34,12 @@ import socket
 import sys
 import time
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_USD = os.path.join(REPO, 'assets', 'isaac', 'opti3_welding_scene', 'posco_torch.usd')
+
 ap = argparse.ArgumentParser()
-ap.add_argument('--usd', required=True, help='posco_torch.usd 경로 (폴더 구조 그대로)')
+ap.add_argument('--usd', default=DEFAULT_USD,
+                help='posco_torch.usd 경로. 장면 폴더 구조 그대로 (기본: assets/isaac/opti3_welding_scene)')
 ap.add_argument('--prim', default='/World/indy')
 ap.add_argument('--joints', default='joint0,joint1,joint2,joint3,joint4,joint5')
 ap.add_argument('--initial-q', default='0,-0.5236,1.7453,0,0.8727,0', help='rad, joint0~5 시작 자세')
@@ -74,6 +79,8 @@ def addr(s: str) -> tuple[str, int]:
 JOINTS = args.joints.split(',')
 Q0 = np.array([float(x) for x in args.initial_q.split(',')])
 
+if not os.path.isfile(args.usd):
+    sys.exit(f'장면 파일이 없습니다: {args.usd}')
 if not open_stage(args.usd):
     sys.exit(f'장면 열기 실패: {args.usd}')
 PHYS_DT = 1.0 / args.physics_hz

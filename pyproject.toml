@@ -1,0 +1,10 @@
+# 도구 설정만 둔다 (패키지 설치 설정은 아직 없음: 스크립트는 저장소 루트에서 python -m ... 으로 실행).
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["weld_teleop/test", "sim_errors/test", "sim_bridge/test", "learning/test", "common/test"]
