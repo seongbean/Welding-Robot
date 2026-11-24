@@ -81,6 +81,32 @@ def check_reach(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, to
     return bad, q_first
 
 
+def reach_scan(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, accept: float,
+               n: int = 41) -> dict:
+    """Isaac 없이 이음매 전체의 IK 도달만 본다 (run_batch --reach-only).
+    반환: 최대 IK 오차, tol·accept 넘는 점 수, 이웃 점 사이 관절 최대 변화(손목 뒤집힘 확인), 리밋 여유, 시작 자세 IK."""
+    q = q0.copy()
+    lift = expert.ex['standoff_mm'] * 1e-3
+    errs, qs = [], []
+    for s in np.linspace(0, 1, n):
+        q_sol, ok, err = kin.ik(to_se3(expert.seam_pose(s, s, lift)), q, iters=200)
+        errs.append(0.0 if ok else err)
+        if ok or err <= accept:
+            q = q_sol
+        qs.append(q.copy())
+    qs = np.array(qs)
+    errs = np.array(errs)
+    jump = float(np.abs(np.diff(qs, axis=0)).max()) if len(qs) > 1 else 0.0
+    margin = float(np.minimum(qs - kin.lower, kin.upper - qs).min())
+    _, ok0, err0 = kin.ik(to_se3(expert.start_pose()), qs[0], iters=200)
+    start_err = 0.0 if ok0 else err0
+    return {'max_err': float(errs.max()), 'n_over_tol': int((errs > tol).sum()),
+            'n_over_accept': int((errs > accept).sum()), 'joint_jump_rad': jump,
+            'limit_margin_rad': margin, 'start_err': float(start_err),
+            'q_min': qs.min(axis=0).round(3).tolist(), 'q_max': qs.max(axis=0).round(3).tolist(),
+            'ok': bool((errs <= accept).all() and start_err <= tol and jump < 0.3)}
+
+
 class SimLink:
     """receiver와의 UDP 연결. 실측 메시지: q, rx, (새 receiver) seq, t(시뮬 시각), reset_id."""
 
