@@ -102,6 +102,54 @@ def _kin_job(args) -> str:
     return out_path
 
 
+def family_of(name: str) -> str:
+    for pre, fam in (('corner_', 'fillet_corner'), ('butt_', 'butt_v'), ('pipe_', 'pipe_girth')):
+        if name.startswith(pre):
+            return fam
+    return 'fillet_t'
+
+
+def reach_only(files: list[str], args) -> int:
+    """시나리오마다 자동 배치 → 이음매 41점 IK·시작 자세 IK. Isaac 실행 전에 몇 분이면 끝난다."""
+    if not args.follower_urdf:
+        sys.exit('--reach-only에는 --follower-urdf가 필요합니다')
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from expert_to_sim import build_stepper, reach_scan
+    from sim_errors.expert import ScriptedExpert, auto_nominal
+    from sim_errors.part_errors import PartErrorModel
+    stepper = build_stepper(args.follower_config, args.follower_urdf)
+    kin = stepper.kin
+    home = np.array([float(x) for x in args.home_q.split(',')])
+    T_home = kin.fk(home).homogeneous
+    rows = []
+    for k, f in enumerate(files, 1):
+        model = PartErrorModel(load_scenario(f))
+        model.set_nominal(auto_nominal(T_home, model.L, mid_part=model.nominal(0.5)[0][0]))
+        expert = ScriptedExpert(model, T_home, np.random.default_rng(0))
+        r = reach_scan(kin, expert, home, stepper.tol, stepper.accept)
+        r.update(file=os.path.basename(f), family=family_of(os.path.basename(f)))
+        rows.append(r)
+        if not r['ok'] or k % 20 == 0 or k == len(files):
+            print(f'[{k}/{len(files)}] {r["file"]}: {"통과" if r["ok"] else "실패"} 최대 오차 {r["max_err"]:.4f}, '
+                  f'시작 {r["start_err"]:.4f}, 관절 변화 {r["joint_jump_rad"]:.3f} rad, 리밋 여유 {r["limit_margin_rad"]:.2f} rad',
+                  flush=True)
+    with open(os.path.join(args.out, 'reach_report.json'), 'w', encoding='utf-8') as fo:
+        json.dump({'n': len(rows), 'ok': sum(r['ok'] for r in rows), 'tol': stepper.tol, 'accept': stepper.accept,
+                   'scenarios': rows}, fo, ensure_ascii=False, indent=1)
+    print(f'\n{"시편군":<14}{"개수":>5}{"통과":>5}{"최대 오차":>10}{"관절 변화 rad":>14}{"리밋 여유 rad":>14}  관절 범위 (rad, 최소..최대)')
+    for fam in ('fillet_t', 'fillet_corner', 'butt_v', 'pipe_girth'):
+        g = [r for r in rows if r['family'] == fam]
+        if not g:
+            continue
+        lo = np.min([r['q_min'] for r in g], axis=0)
+        hi = np.max([r['q_max'] for r in g], axis=0)
+        rng = ' '.join(f'{a:+.2f}..{b:+.2f}' for a, b in zip(lo, hi))
+        print(f'{fam:<14}{len(g):>5}{sum(r["ok"] for r in g):>5}{max(r["max_err"] for r in g):>10.4f}'
+              f'{max(r["joint_jump_rad"] for r in g):>14.3f}{min(r["limit_margin_rad"] for r in g):>14.2f}  {rng}')
+    print(f'보고서: {os.path.join(os.path.abspath(args.out), "reach_report.json")}')
+    return 0 if all(r['ok'] for r in rows) else 1
+
+
 def main():
     for st in (sys.stdout, sys.stderr):
         try:
@@ -122,6 +170,8 @@ def main():
     ap.add_argument('--only', help='이름에 이 문자열이 든 시나리오만 (예: mixed)')
     ap.add_argument('--overwrite', action='store_true')
     ap.add_argument('--report-only', action='store_true', help='실행 없이 있는 에피소드로 보고서만')
+    ap.add_argument('--reach-only', action='store_true',
+                    help='Isaac 없이 opti3 IK 도달만 점검 (--follower-urdf 필요). <out>/reach_report.json')
     args = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(args.scenarios, '*.json')))
@@ -135,6 +185,9 @@ def main():
     seed_of = lambda f: files.index(f)  # noqa: E731   # 단면 센서 노이즈 시드
     print(f'시나리오 {len(files)}개, 새로 만들 것 {0 if args.report_only else len(todo)}개 → {os.path.abspath(args.out)}')
     t0 = time.time()
+
+    if args.reach_only:
+        return reach_only(files, args)
 
     if not args.report_only and todo:
         if args.kinematic:

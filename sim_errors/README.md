@@ -56,6 +56,10 @@ Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경�
    중단해도 같은 명령으로 이어서 만든다(있는 .npz는 건너뜀). 끝나면 강도별 통계와 `episodes\t_small\batch_report.json`.
    점검에 실패한 에피소드는 보고서에 이유가 남고 학습 변환에서 빠진다. 끝나지 않은 실행은 `*.failed.npz`.
 4. Isaac 없이 흐름만 시험: `python sim_bridge/run_batch.py batches/t_small --out episodes/t_small_kin --kinematic --jobs 4`
+5. Isaac을 띄우기 전 도달 점검: `python sim_bridge\run_batch.py batches\t_small --out reach --reach-only --follower-urdf ...\opti3.urdf`
+   시나리오마다 자동 배치 후 이음매 41점과 시작 자세의 opti3 IK만 풀어 본다(Isaac 불필요, 수백 개에 몇 분).
+   최대 IK 오차, 이웃 점 사이 관절 최대 변화(0.3 rad 이상이면 손목 뒤집힘으로 실패), 리밋 여유, 시편군별 관절 범위를
+   찍고 `reach\reach_report.json`에 남긴다. 여기서 실패한 시나리오는 Isaac에서도 `reach`로 끝난다.
 
 receiver 쪽 동작: 패킷의 `scene.scenario`가 바뀌면 모재를 다시 만들고, `reset_q`가 오면 로봇을 그 관절 자세로 순간 이동시킨다.
 답장의 시뮬 시각(`t`)으로 전문가를 한 주기씩 진행하므로, Isaac이 멈추면 전문가도 멈춘다(single_place에서 0.34초 끊김으로 생긴
@@ -113,7 +117,20 @@ poscoenc 시편의 선택 V홈은 아직 넣지 않았다. 여러 군 에피소�
 - 노이즈 없는 단면 측정이 정답과 같은지 네 군을 같은 방법(혼합 40개 × 용접 중 12점 + 시작 구간 스캔 7점)으로 봤다. 파이프 최대 차이
   좌우 0.035, 높이 0.036 mm, 작업각 0.015°, 진행각 0.025°로 다른 군(0.03–0.05 mm, 진행각 0.08–0.14°)과 같은 수준이고 평균 치우침은 0이다(`test/test_pipe.py`).
 - Isaac 장면은 관 둘레 전체 메시를 만든다(용접 구간 밖은 오차를 양 끝 값으로). `expert_to_sim.py` 자동 배치는 호의 가운데(꼭대기)를 토치 아래에 둔다.
-  Isaac 물리 실행(추종, IK 도달 범위)은 T 필릿만 확인했고 코너·V홈·파이프는 아직이다.
+  Isaac 물리 실행(추종, IK 도달 범위)은 T 필릿만 확인했고 코너·V홈·파이프는 아직이다. 확인 순서는 아래 "Isaac 물리 검증 (코너·V홈·파이프)".
+
+### Isaac 물리 검증 (코너·V홈·파이프)
+
+운동학 에피소드는 완벽 추종이라 opti3 도달 범위와 Isaac 관절 추종을 보지 않는다. 시편군마다 1/5 묶음(약 67개)으로 본다.
+
+1. 시나리오: `for %f in (fillet_corner butt_v pipe_girth) do python -m sim_errors.make_scenarios --batch --scale 0.2 --family %f --out exp_isaac\batch`
+2. 도달 점검: `python sim_bridge\run_batch.py exp_isaac\batch --out exp_isaac\reach --reach-only --follower-urdf ...\opti3.urdf`
+3. 화면 확인 (receiver를 `--headless` 없이): 군마다 `--only pipe_clean --limit 1`처럼 하나씩 돌려, 모재가 토치 아래에 놓이고
+   토치 끝이 빨간 선을 따라가는지 본다. 파이프는 토치가 호를 따라 ±50° 기운다.
+4. 일괄 (`--headless --lockstep`): `python sim_bridge\run_batch.py exp_isaac\batch --only pipe_ --out exp_isaac\episodes\pipe --follower-urdf ...`
+   (`corner_`, `butt_`도 같게). 군마다 `batch_report.json`.
+
+판정 기준은 T 필릿 Isaac 실행(66개 모두 통과, 추종 95% 약 0.55 mm)과 같다: 모두 통과, 추종 95% 2 mm 미만, IK 경고 비율, 용접 시간.
 
 ## 단면 센서 모델 (평면 맞춤)
 
