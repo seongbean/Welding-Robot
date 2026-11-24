@@ -115,7 +115,7 @@ def reach_only(files: list[str], args) -> int:
         sys.exit('--reach-only에는 --follower-urdf가 필요합니다')
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from expert_to_sim import build_stepper, reach_scan
-    from sim_errors.expert import ScriptedExpert, auto_nominal
+    from sim_errors.expert import ScriptedExpert, isaac_nominal
     from sim_errors.part_errors import PartErrorModel
     stepper = build_stepper(args.follower_config, args.follower_urdf)
     kin = stepper.kin
@@ -124,7 +124,7 @@ def reach_only(files: list[str], args) -> int:
     rows = []
     for k, f in enumerate(files, 1):
         model = PartErrorModel(load_scenario(f))
-        model.set_nominal(auto_nominal(T_home, model.L, mid_part=model.nominal(0.5)[0][0]))
+        model.set_nominal(isaac_nominal(model, T_home))
         expert = ScriptedExpert(model, T_home, np.random.default_rng(0))
         r = reach_scan(kin, expert, home, stepper.tol, stepper.accept)
         r.update(file=os.path.basename(f), family=family_of(os.path.basename(f)))

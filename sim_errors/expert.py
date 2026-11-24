@@ -201,3 +201,17 @@ def auto_nominal(T_tip: np.ndarray, length: float, drop: float = 0.02, mid_part=
     mp = np.array([length / 2, 0.0, 0.0]) if mid_part is None else np.asarray(mid_part, dtype=float)
     T[:3, 3] = mid - R @ mp
     return T
+
+
+# Isaac 자동 배치에서 시편군별로 모재를 더 옮기는 양 (베이스 좌표, m). 실제 opti3.urdf로 run_batch --reach-only를 돌려 정했다:
+# 필릿은 토치가 45° 기울어 시작 자세 팁 바로 아래에 두면 플랜지가 베이스 축 근처(x 0.09 m, 어깨 특이점)에 와서
+# 이음매를 따라가는 중 관절이 0.9 rad 넘게 튀었다. +X 0.2, -Z 0.05 옮기면 41점 사이 관절 최대 변화 0.07–0.09 rad.
+# 맞대기·파이프는 토치가 거의 수직이라 그대로 둔다 (0.03 / 0.12 rad).
+ISAAC_SHIFT = {'fillet_t': (0.2, 0.0, -0.05), 'fillet_corner': (0.2, 0.0, -0.05)}
+
+
+def isaac_nominal(model, T_tip: np.ndarray) -> np.ndarray:
+    """Isaac 실행의 모재 배치: auto_nominal(이음매 가운데를 시작 자세 팁 아래에) + 시편군별 ISAAC_SHIFT."""
+    T = auto_nominal(T_tip, model.L, mid_part=model.nominal(0.5)[0][0])
+    T[:3, 3] += np.asarray(ISAAC_SHIFT.get(model.scn['geometry'].get('joint', 'fillet_t'), (0.0, 0.0, 0.0)))
+    return T

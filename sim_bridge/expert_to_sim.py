@@ -38,7 +38,7 @@ for p in (REPO, PKG):
 import pinocchio as pin  # noqa: E402
 
 from sim_errors.episode import Recorder  # noqa: E402
-from sim_errors.expert import ScriptedExpert, auto_nominal  # noqa: E402
+from sim_errors.expert import ScriptedExpert, isaac_nominal  # noqa: E402
 from sim_errors.part_errors import PartErrorModel, load_scenario  # noqa: E402
 from weld_teleop.follower_control import FollowerStepper  # noqa: E402
 from weld_teleop.kinematics import ChainKinematics, se3_from_xyz_rpy, se3_to_xyzquat  # noqa: E402
@@ -65,37 +65,58 @@ def to_se3(T: np.ndarray) -> pin.SE3:
     return pin.SE3(np.asarray(T[:3, :3]), np.asarray(T[:3, 3]))
 
 
-def check_reach(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, n: int = 21):
-    """이음매 전체(가장 변형된 상태 s_arc=s)에 IK가 닿는지 미리 확인. 반환: (실패한 s 목록, 시작점 관절 자세)."""
-    q = q0.copy()
-    bad, q_first = [], None
-    lift = expert.ex['standoff_mm'] * 1e-3
-    for s in np.linspace(0, 1, n):
-        q_sol, ok, err = kin.ik(to_se3(expert.seam_pose(s, s, lift)), q, iters=100)
-        if ok or err <= tol:
-            q = q_sol
-            if q_first is None and s == 0:
-                q_first = q_sol.copy()
-        else:
-            bad.append((round(float(s), 2), round(err, 4)))
-    return bad, q_first
-
-
-def reach_scan(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, accept: float,
-               n: int = 41) -> dict:
-    """Isaac 없이 이음매 전체의 IK 도달만 본다 (run_batch --reach-only).
-    반환: 최대 IK 오차, tol·accept 넘는 점 수, 이웃 점 사이 관절 최대 변화(손목 뒤집힘 확인), 리밋 여유, 시작 자세 IK."""
-    q = q0.copy()
-    lift = expert.ex['standoff_mm'] * 1e-3
-    errs, qs = [], []
-    for s in np.linspace(0, 1, n):
+def _walk(kin: ChainKinematics, expert: ScriptedExpert, q: np.ndarray, ss, lift: float, accept: float):
+    """이음매를 s 순서로 따라가며 이전 해로 IK 시드. 반환: (관절 (n,6), 오차 (n,))."""
+    qs, errs = [], []
+    for s in ss:
         q_sol, ok, err = kin.ik(to_se3(expert.seam_pose(s, s, lift)), q, iters=200)
         errs.append(0.0 if ok else err)
         if ok or err <= accept:
             q = q_sol
         qs.append(q.copy())
-    qs = np.array(qs)
-    errs = np.array(errs)
+    return np.array(qs), np.array(errs)
+
+
+def seam_path_q(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, accept: float, n: int = 41,
+                n_seeds: int = 40) -> tuple[np.ndarray, np.ndarray]:
+    """이음매 시작점 IK를 여러 시드(q0 + 고정 난수 섭동)로 풀고, 이음매를 따라갔을 때 도달 못 한 점이 가장 적고
+    이웃 점 관절 변화가 0.2 rad 미만인 해 중 q0에 가장 가까운 해를 고른다. 시드 하나(q0)만 쓰면 opti3가 어깨 특이점 근처의
+    해로 들어가 이음매 중간에 손목이 뒤집혔다. 반환: (관절 (n,6), 오차 (n,))."""
+    lift = expert.ex['standoff_mm'] * 1e-3
+    rng = np.random.default_rng(0)
+    seeds = [q0] + [np.clip(q0 + rng.uniform(-1.5, 1.5, len(q0)), kin.lower, kin.upper) for _ in range(n_seeds)]
+    T0 = to_se3(expert.seam_pose(0.0, 0.0, lift))
+    starts = []
+    for sd in seeds:
+        q, ok, err = kin.ik(T0, sd, iters=300)
+        if (ok or err <= accept) and not any(np.abs(q - o).max() < 1e-2 for o in starts):
+            starts.append(q)
+    if not starts:
+        starts = [q0]
+    ss = np.linspace(0, 1, n)
+    best = None
+    for q in starts:
+        qs, errs = _walk(kin, expert, q, ss, lift, accept)
+        jump = float(np.abs(np.diff(qs, axis=0)).max())
+        key = (int((errs > accept).sum()), jump >= 0.2, float(np.abs(qs[0] - q0).max()))   # 매끄러우면 q0에 가까운 해
+        if best is None or key < best[0]:
+            best = (key, qs, errs)
+    return best[1], best[2]
+
+
+def check_reach(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, n: int = 41):
+    """이음매 전체(가장 변형된 상태 s_arc=s)에 IK가 닿는지 미리 확인. 반환: (실패한 s 목록, 시작점 관절 자세)."""
+    qs, errs = seam_path_q(kin, expert, q0, tol, n)
+    ss = np.linspace(0, 1, n)
+    bad = [(round(float(s), 2), round(float(e), 4)) for s, e in zip(ss, errs) if e > tol]
+    return bad, (qs[0].copy() if errs[0] <= tol else None)
+
+
+def reach_scan(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol: float, accept: float,
+               n: int = 41) -> dict:
+    """Isaac 없이 이음매 전체의 IK 도달만 본다 (run_batch --reach-only). 해 고르기는 실제 실행과 같다(seam_path_q).
+    반환: 최대 IK 오차, tol·accept 넘는 점 수, 이웃 점 사이 관절 최대 변화(손목 뒤집힘 확인), 리밋 여유, 시작 자세 IK."""
+    qs, errs = seam_path_q(kin, expert, q0, accept, n)
     jump = float(np.abs(np.diff(qs, axis=0)).max()) if len(qs) > 1 else 0.0
     margin = float(np.minimum(qs - kin.lower, kin.upper - qs).min())
     _, ok0, err0 = kin.ik(to_se3(expert.start_pose()), qs[0], iters=200)
@@ -103,6 +124,7 @@ def reach_scan(kin: ChainKinematics, expert: ScriptedExpert, q0: np.ndarray, tol
     return {'max_err': float(errs.max()), 'n_over_tol': int((errs > tol).sum()),
             'n_over_accept': int((errs > accept).sum()), 'joint_jump_rad': jump,
             'limit_margin_rad': margin, 'start_err': float(start_err),
+            'q_start': qs[0].round(3).tolist(),
             'q_min': qs.min(axis=0).round(3).tolist(), 'q_max': qs.max(axis=0).round(3).tolist(),
             'ok': bool((errs <= accept).all() and start_err <= tol and jump < 0.3)}
 
@@ -172,7 +194,7 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
     model = PartErrorModel(scn)
     T_home = kin.fk(home_q).homogeneous
     if not use_scenario_pose:
-        model.set_nominal(auto_nominal(T_home, model.L, mid_part=model.nominal(0.5)[0][0]))
+        model.set_nominal(isaac_nominal(model, T_home))
     expert = ScriptedExpert(model, T_home, np.random.default_rng(sensor_seed))
     rec = Recorder()
     bad, q_seam0 = check_reach(kin, expert, home_q, stepper.accept)
