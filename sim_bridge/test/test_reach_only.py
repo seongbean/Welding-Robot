@@ -38,3 +38,19 @@ def test_reach_only_all_families(tmp_path):
     assert rep['n'] == rep['ok'] == 8
     assert {s['family'] for s in rep['scenarios']} == {'fillet_t', 'fillet_corner', 'butt_v', 'pipe_girth'}
     assert not list(out.glob('*.npz'))     # 에피소드는 만들지 않음
+
+
+def test_isaac_shift_only_for_fillets():
+    from sim_errors.expert import ISAAC_SHIFT, auto_nominal, isaac_nominal
+    from sim_errors.part_errors import PartErrorModel
+    import numpy as np
+    with open(DEFAULT_CFG, encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
+    T_tip = np.eye(4)
+    T_tip[:3, 3] = [0.45, 0.0, 0.2]
+    for fam in ('fillet_t', 'fillet_corner', 'butt_v', 'pipe_girth'):
+        c = family_cfg(cfg, fam) if fam != 'fillet_t' else cfg
+        _, scn = make_batch(c, {'clean': 1, 'single': 0, 'mixed': 0, 'hard': 0}, seed=1)[0]
+        m = PartErrorModel(scn)
+        d = isaac_nominal(m, T_tip)[:3, 3] - auto_nominal(T_tip, m.L, mid_part=m.nominal(0.5)[0][0])[:3, 3]
+        assert np.allclose(d, ISAAC_SHIFT.get(fam, (0, 0, 0)))
