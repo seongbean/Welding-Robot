@@ -59,10 +59,15 @@ python -m learning.run_experiment --exp $E --jobs 8                         # �
 | 대표 정책 `policy.pt` | GitHub Release 첨부 |
 | 시나리오, 에피소드, 데이터셋, 일반 runs | `outputs/` (gitignore) |
 
-## 옛 경로 (임시)
+## 기본 출력
 
-2026-11-25에 로컬 산출물을 이 구조로 옮겼습니다. 옛 이름 `exp`, `exp_isaac`, `github-evals`는 새 위치를 가리키는
-Windows 정션으로 남아 있어 예전 명령도 같은 곳에 씁니다. 대응표는 로컬의 `outputs/MIGRATION.md`에 있습니다.
+`--exp`도 `--out`도 주지 않은 단독 실행은 `outputs/scratch/` 아래에 씁니다:
+`make_scenarios` → `scratch/scenarios/`, `expert_to_sim.py` → `scratch/episodes/`, `evaluate rule`의 `--rule-dir` → `scratch/runs/`.
+저장소 루트나 현재 폴더에 산출물 폴더를 만들지 않습니다.
+
+## 옛 경로
+
+2026-11-25에 로컬 산출물을 이 구조로 옮겼습니다. 대응표는 로컬의 `outputs/MIGRATION.md`에 있습니다.
 
 | 옛 경로 | 새 경로 |
 | --- | --- |
@@ -72,4 +77,4 @@ Windows 정션으로 남아 있어 예전 명령도 같은 곳에 씁니다. 대
 | `batches/t_small`, `episodes/t_small(_prof)`, `datasets/t_small(_prof)`, `runs/` | `outputs/experiments/20251118-t-small/` |
 | `scenarios/`, `scenarios_single/`, `episodes/*.npz` | `outputs/scratch/20251117-single-checks/` |
 
-새 실험은 옛 경로가 아니라 `outputs/experiments/<ID>/`에 만듭니다. 정션은 모든 작업이 새 경로로 옮겨 온 뒤 지웁니다.
+옛 이름은 `.gitignore`에 남아 있어, 예전 명령으로 다시 생겨도 커밋되지 않습니다.

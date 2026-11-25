@@ -27,7 +27,7 @@ Isaac Sim 쪽은 Isaac Sim에 들어 있는 파이썬을 쓰므로 설치할 것
 
 터미널 1: Isaac Sim (경로는 설치 위치에 맞게)
 ```bat
-C:\isaacsim\python.bat C:\workspace\Welding-Robot\sim_bridge\isaac_opti3_receiver.py --usd C:\...\opti3_welding_scene\posco_torch.usd
+C:\isaacsim\python.bat C:\workspace\Welding-Robot\sim_bridge\isaac_opti3_receiver.py   # 장면 기본값 assets\isaac\opti3_welding_scene\posco_torch.usd
 ```
 장면이 열리면 opti3가 시작 자세(토치가 로봇 앞에서 아래를 향함, `--initial-q`로 변경 가능)로 선다.
 

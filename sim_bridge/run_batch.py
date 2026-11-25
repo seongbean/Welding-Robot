@@ -4,7 +4,7 @@
 사용법 (저장소 루트에서)
   python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches/t_small
   터미널 1 (Isaac Sim, 한 번만 띄움):
-    C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd ...\\posco_torch.usd --lockstep
+    C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --lockstep
   터미널 2 (conda activate weld):
     python sim_bridge/run_batch.py batches/t_small --out episodes/t_small --follower-urdf C:/.../opti3.urdf
   Isaac 없이 흐름만 시험 (완벽 추종 가정, pinocchio·URDF 불필요):
