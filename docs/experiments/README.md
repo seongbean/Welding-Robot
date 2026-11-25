@@ -5,7 +5,7 @@
 
 | 실험 ID | 내용 | 로컬 산출물 | GitHub 실행 |
 | --- | --- | --- | --- |
-| [20261125-isaac-policy](20261125-isaac-policy.md) | 공용 MLP가 Isaac opti3를 직접 모는 닫힌 루프 (진행 중) | `outputs/experiments/20261125-isaac-policy/` | |
+| [20261125-isaac-policy](20261125-isaac-policy.md) | 공용 MLP가 Isaac opti3를 직접 모는 닫힌 루프 (명령 = 운동학, 뚫음 없음) | `outputs/experiments/20261125-isaac-policy/` | |
 | [20261123-kin-4fam](20261123-kin-4fam.md) | 파이프 원주 추가, 네 군 공용 MLP (운동학, 사용자 PC) | `outputs/experiments/20261123-kin-4fam/` | |
 | [20261119-butt-v](20261119-butt-v.md) | 맞대기 V홈 추가, 단차 대조와 보정 | | [44470621849](https://github.com/seongbean/Welding-Robot/actions/runs/44470621849), [44480051785](https://github.com/seongbean/Welding-Robot/actions/runs/44480051785), [44492062655](https://github.com/seongbean/Welding-Robot/actions/runs/44492062655) |
 | [20261119-corner](20261119-corner.md) | ㄱ자 코너 필릿 추가, T/코너 교차 학습·수량 대조 | | [44453804249](https://github.com/seongbean/Welding-Robot/actions/runs/44453804249), [44460136780](https://github.com/seongbean/Welding-Robot/actions/runs/44460136780) |
