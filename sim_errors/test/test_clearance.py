@@ -66,3 +66,20 @@ def test_pipe_unwrap_and_distance():
         D = plate_distances(m, P)
         assert D[0, BASE] == pytest.approx(0.006, abs=1e-9)
         assert D[1, WEB] > 0.05
+
+
+@pytest.mark.parametrize('fam', ['fillet_t', 'pipe_girth'])
+def test_seam_shift_follows_true_seam(fam):
+    """오차가 있는 시나리오: 실제 이음매 바로 위 점은 명목 판 기준으론 어긋나도, 벗어남을 옮기면 제자리 거리가 나온다."""
+    m = model(fam)
+    for s, s_arc in ((0.2, 0.2), (0.6, 0.9)):
+        p, R = m.seam_true(np.array([s]), s_arc)
+        d = 0.008
+        Q = p[0] + R[0] @ np.array([0.0, 0.0, d])            # 실제 이음매 좌표계 z(이등분·법선) 방향 d
+        D = plate_distances(m, Q[None], s_arc=s_arc)[0]
+        exp = d / np.sqrt(2) if fam == 'fillet_t' else None   # 필릿: 두 판에 45°
+        if exp is not None:
+            assert D == pytest.approx([exp, exp], abs=6e-4)
+        else:                                                  # V홈 루트 위 d: 두 개선 면까지 d·sin(개선 각)
+            bevel = m.scn['geometry']['bevel']
+            assert D == pytest.approx([d * np.sin(bevel)] * 2, abs=6e-4)

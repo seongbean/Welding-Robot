@@ -11,8 +11,8 @@ tools/extract_scene_points.py로 posco_torch.usd에서 뽑음. 장면의 링크�
 
 - 부위: 와이어 끝(팁에서 --wire-mm 안의 토치 점), 토치 앞(--nozzle-mm 안, 장면 토치는 와이어가 노즐 밖으로 약 55 mm 나와 있어
   와이어 나머지와 노즐 입구), 토치 뒤(나머지), 손목(link5·6), 팔(link1~4).
-- 간격 = 부위 표면 점에서 모재 판까지 부호 거리의 최소 (음수 = 뚫음). 모재는 명목 단면 기둥이고 변형(mm 단위)은 넣지 않는다
-  (sim_errors/clearance.py). 와이어 끝 간격은 팁–모재 거리라 1~2 mm가 정상이다 (standoff 2 mm, 필릿은 두 판에 45°).
+- 간격 = 부위 표면 점에서 모재 판까지 부호 거리의 최소 (음수 = 뚫음). 모재는 명목 단면 기둥을 그 진행도의 이음매 벗어남만큼
+  옮긴 것이고, 판의 기울어짐(각변형)은 넣지 않는다 (sim_errors/clearance.py). 와이어 끝 간격은 팁–모재 거리라 1~2 mm가 정상이다 (standoff 2 mm, 필릿은 두 판에 45°).
 - 표면 점 간격이 토치 3 mm, 링크 8 mm라 그보다 작은 파고듦은 놓칠 수 있다.
 """
 from __future__ import annotations
@@ -83,7 +83,7 @@ def check_episode(path: str, shape: RobotShape, every: int) -> dict:
     best = {b: (np.inf, 0.0, 0) for b in BODIES}
     for i in weld:
         for b, P in shape.points(d['q_meas'][i]).items():
-            D = plate_distances(model, P)
+            D = plate_distances(model, P, s_arc=float(d['s_arc'][i]))
             k = np.unravel_index(np.argmin(D), D.shape)
             if D[k] < best[b][0]:
                 best[b] = (float(D[k]), float(d['s'][i]), int(k[1]))
