@@ -129,7 +129,7 @@ poscoenc 시편의 선택 V홈은 아직 넣지 않았다. 여러 군 에피소�
 
 운동학 에피소드는 완벽 추종이라 opti3 도달 범위와 Isaac 관절 추종을 보지 않는다. 시편군마다 1/5 묶음(약 67개)으로 본다.
 
-결과는 실험 `20261124-isaac-4fam`(`outputs/experiments/20261124-isaac-4fam/`)에 있다.
+결과는 실험 `20261124-isaac-4fam`(`outputs/experiments/20261124-isaac-4fam/`, 기록 [docs/experiments/20261124-isaac-4fam.md](../docs/experiments/20261124-isaac-4fam.md))에 있다.
 
 1. 시나리오: `for %f in (fillet_corner butt_v pipe_girth) do python -m sim_errors.make_scenarios --batch --scale 0.2 --family %f --exp 20261124-isaac-4fam`
 2. 도달 점검: `python sim_bridge\run_batch.py --exp 20261124-isaac-4fam --reach-only --follower-urdf ...\opti3.urdf`
@@ -150,7 +150,7 @@ poscoenc 시편의 선택 V홈은 아직 넣지 않았다. 여러 군 에피소�
 | 파이프 원주 | 68/68 | 0 | 0% | 0.41 / 0.71 | 81 |
 
 세 군 모두 T 필릿(약 0.55 mm)보다 낮거나 같은 추종 오차로 통과했다. 강도별로는 가혹 묶음이 조금 크다(중앙 0.41–0.48 mm).
-화면 확인(토치 끝이 빨간 선을 따라가는지)은 아직이다. 추종 오차는 URDF FK로 재므로 Isaac 장면 토치 팁이 URDF와 다르면 여기서 드러나지 않는다.
+추종 오차는 URDF FK로 재므로 Isaac 장면 토치 팁이 URDF와 다르면 여기서 드러나지 않는다. 화면 확인은 Isaac 정책 실행기에서 했다(장면 프레임 = URDF, 뚫음 없음, [20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)).
 
 ## 단면 센서 모델 (평면 맞춤)
 
