@@ -13,9 +13,9 @@
 의존성: numpy 만 필요 (ROS2 / pinocchio 불필요, Windows에서 바로 실행)
 
 사용법
-  python so102_urdf_check.py                 # 측정 절차와 예측값 출력
-  python so102_urdf_check.py --measure       # 측정값을 입력받아 판정
-  python so102_urdf_check.py --urdf path/to/so102.urdf --tcp-offset-mm 0 0 0
+  python tools/so102_urdf_check.py                 # 측정 절차와 예측값 출력
+  python tools/so102_urdf_check.py --measure       # 측정값을 입력받아 판정
+  python tools/so102_urdf_check.py --urdf path/to/so102.urdf --tcp-offset-mm 0 0 0
 """
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ def main():
             st.reconfigure(encoding='utf-8')
         except Exception:
             pass
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 저장소 루트 (이 파일은 tools/)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default_urdf = next((c for c in (os.path.join(here, 'weld_teleop', 'urdf', 'so102.urdf'),
                                      os.path.join(here, 'so102.urdf')) if os.path.exists(c)),
@@ -228,7 +228,7 @@ def main():
         T3은 부호와 무관 → 0.056 m 링크 길이 검증용.''')
 
     if not args.measure:
-        print('\n실측 후:  python so102_urdf_check.py --measure')
+        print('\n실측 후:  python tools/so102_urdf_check.py --measure')
         return
 
     # --- 4. 판정
