@@ -57,6 +57,27 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
 
 학습용 묶음은 receiver를 `--scenario` 없이(대량이면 `--headless --lockstep`) 한 번 띄워 두고 `run_batch.py`로 연달아 만든다. 시나리오 교체와 로봇 바로 놓기는 패킷으로 한다. receiver 관절 게인 기본값은 검증한 `kp 1e5 / kd 2e3`이다. 이전 값이 필요하면 `--kp 1e4 --kd 1e3`.
 
+## 5. 학습 정책으로 몰기 (Isaac 정책 실행기)
+
+`policy_to_sim.py`는 규칙 전문가 대신 학습한 보정 정책(`learning.train_bc`의 `policy.pt`, 또는 규칙 기준선 `rule`)이 매 주기
+토치 목표를 내서 opti3를 몬다. `expert_to_sim.run_episode`를 그대로 쓰고 목표를 내는 부분만 `learning/policy_driver.py`로 바꿔서,
+모재 자동 배치·이음매 IK 도달 확인·시작 자세 바로 놓기·lockstep·기록은 `run_batch.py`와 같다. 정책 관측의 토치 자세는 Isaac 실측이다.
+
+```bat
+set K=outputs\experiments\20251123-kin-4fam
+python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenarios %K%\episodes ^
+    --kin-eval %K%\runs\mlp_all\eval.json --exp 20251125-isaac-policy --follower-urdf C:\...\opti3.urdf
+```
+
+- 시나리오는 `*.json` 또는 에피소드 `*.npz` 폴더에서 `--split`(기본 test)만 쓴다. 운동학 실험의 에피소드 폴더를 주면 운동학 평가와 같은 시험 시나리오다.
+  `--only`, `--per-family N`, `--limit N`으로 줄인다. 화면 확인은 receiver를 `--headless` 없이 띄우고 `--only pipe_clean --limit 1`처럼.
+- 출력은 `<실험>/runs/<정책 이름>/isaac/`: 에피소드 `.npz`(정책 보정 `policy_c`, 행동 `policy_action`, 관절 실측 포함), receiver가 읽는 시나리오 사본
+  `scenarios/`, 요약 `eval_isaac.json`. 도달 실패로 시작 못 한 시나리오는 `skipped.json`에 남고 다음 실행에서 건너뛴다.
+- 오차는 **측정**(실측 토치 FK − 실제 이음매, 좌우는 명령한 위빙을 뺌)과 **명령**(정책 보정 − 실제 이음매, 운동학 평가와 같은 정의)
+  두 가지다. `--kin-eval`을 주면 같은 에피소드의 운동학 오차를 옆에 놓는다. 추종 95%(실측 팁과 목표 거리)와 뒤짐(이음매 방향으로
+  실측이 명령보다 늦은 평균)도 낸다. `--report-only`는 Isaac 없이 저장된 에피소드로 요약만 다시 낸다.
+- 완벽 추종(실측 = 목표)이면 명령 오차가 운동학 닫힌 루프(`learning.evaluate`)와 똑같이 나온다 (`learning/test/test_policy_driver.py`).
+
 ## 확인 안 된 것
 
 - `opti3.urdf` 경로: indy-ros2-jazzy 안의 실제 위치로 바꿔 쓴다(xacro만 있으면 알려 줄 것).

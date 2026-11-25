@@ -9,6 +9,7 @@
 | `train_bc.py` | MLP/GRU 행동 복제, 입력 묶음 선택, `policy.pt` 저장 |
 | `evaluate.py` | 열린 루프(기록 관측으로 예측) + 닫힌 루프(운동학, 정책이 직접 토치를 몸) 평가. 정책 자리에 `rule`/`rule-noprescan`을 주면 학습 없는 규칙 기준선 |
 | `report_evals.py` | 여러 `eval.json`을 표 하나로 (실험 워크플로 요약) |
+| `policy_driver.py` | Isaac 정책 실행기(`sim_bridge/policy_to_sim.py`)의 정책 구동과 실측 기준 닫힌 루프 오차 |
 
 ## 관측과 행동
 
@@ -72,6 +73,7 @@ python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
 - 평가 결과는 `<정책 폴더>/eval.json`(`--name X`면 `eval_X.json`, 규칙 기준선은 `<rule-dir>/rule/eval.json`), 학습 곡선은 `train_log.json`.
 - 높이 오차는 시작 30 mm와 나머지로도 나눠 나온다. 시작 구간 스캔으로 학습한 정책(`policy.pt`의 `prescan`)은 닫힌 루프에서도 스캔을 넣는다.
 - 닫힌 루프 평가는 로봇이 명령을 바로 따라간다고 가정한다. Isaac 추종 오차는 들어가지 않는다.
+  Isaac에서 정책이 직접 opti3를 모는 닫힌 루프는 `sim_bridge/policy_to_sim.py` ([sim_bridge/README.md](../sim_bridge/README.md) "학습 정책으로 몰기").
 
 ## 실험 결과
 
@@ -84,4 +86,5 @@ python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
 - 이전 Isaac 기록은 `python -m sim_errors.resense`로 지금 센서 설정(스캔 포함)을 넣은 뒤 다시 변환한다.
 - 실제 depth 카메라로 V홈 시편 단면을 재서 판 윗면 단차 측정이 되는지 확인.
 - 코너·V홈·파이프 Isaac 1/5 묶음은 모두 통과했다(추종 95% 0.33–0.41 mm, sim_errors/README.md "Isaac 물리 검증"). 남은 것: 이 기록으로 학습·평가해 운동학 결과와 비교.
+- Isaac 정책 실행기로 공용 MLP의 Isaac 닫힌 루프를 잰다 ([20251125-isaac-policy](../docs/experiments/20251125-isaac-policy.md)). 이 실행기가 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집의 바탕이다.
 - 파이프의 다른 자세(관 아래쪽까지 5G 전체, 세운 관 2G).
