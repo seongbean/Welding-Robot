@@ -189,14 +189,19 @@ def place_robot(link: SimLink, q_start: np.ndarray, scene: dict, reset_id: int, 
 
 def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_path: str, *, home_q: np.ndarray,
                 use_scenario_pose: bool = False, sensor_seed: int = 0, reset_id: int = 1, max_time: float = 400.0,
-                log=print) -> tuple[Recorder, dict, str]:
-    """에피소드 하나. 반환 (기록, 모재 배치가 반영된 시나리오, 결과: done | reach | place | ik_failed | timeout | stopped)."""
+                log=print, make_driver=None) -> tuple[Recorder, dict, str]:
+    """에피소드 하나. 반환 (기록, 모재 배치가 반영된 시나리오, 결과: done | reach | place | ik_failed | timeout | stopped).
+
+    make_driver(model, expert): 규칙 전문가 대신 토치 목표를 낼 구동기를 만든다 (policy_to_sim.py의 학습 정책).
+    구동기는 step(dt, T_meas) → 전문가 step()과 같은 필드의 dict(+ 'extra': 기록에 더할 필드)와 done을 가진다.
+    배치·도달 확인·시작 자세·lockstep·기록은 전문가 실행과 같다."""
     kin = stepper.kin
     model = PartErrorModel(scn)
     T_home = kin.fk(home_q).homogeneous
     if not use_scenario_pose:
         model.set_nominal(isaac_nominal(model, T_home))
     expert = ScriptedExpert(model, T_home, np.random.default_rng(sensor_seed))
+    driver = make_driver(model, expert) if make_driver is not None else None
     rec = Recorder()
     bad, q_seam0 = check_reach(kin, expert, home_q, stepper.accept)
     if bad:
@@ -242,7 +247,8 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
         if dt <= 0:
             continue
         t_prev = t
-        r = expert.step(min(dt, 0.05))
+        T_meas = kin.fk(stepper.q_meas).homogeneous
+        r = expert.step(min(dt, 0.05)) if driver is None else driver.step(min(dt, 0.05), T_meas)
         stepper.on_target(to_se3(r['T_target']), t)
         q = stepper.step(t)
         scene.update(s_arc=r['s_arc'], phase=r['phase'])
@@ -250,15 +256,14 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
         if q_send is not None:
             link.send(q_send, target=se3_to_xyzquat(to_se3(r['T_target'])).tolist(), scene=scene,
                       ack=msg.get('seq'), reset_id=reset_id)
-        T_meas = kin.fk(stepper.q_meas).homogeneous
         rec.add_expert(r, T_meas=T_meas, q_cmd=q if q is not None else np.full(kin.nq, np.nan),
-                       q_meas=stepper.q_meas.copy(), status=stepper.status, t_sim=t)
+                       q_meas=stepper.q_meas.copy(), status=stepper.status, t_sim=t, **r.get('extra', {}))
         if stepper.status == 'ik_failed':
             log(f'\nIK 실패로 중단 ({stepper.detail}), 진행도 {r["s"]:.3f}')
             result = 'ik_failed'
             break
-        if expert.done:
-            result = 'done'
+        if (driver or expert).done:
+            result = 'done' if r['done'] else 'timeout'     # 정책 구동기는 시간 한도로도 멈춘다
             break
         if time.monotonic() - t_print > 0.2:
             err = np.linalg.norm(T_meas[:3, 3] - r['T_target'][:3, 3]) * 1e3
