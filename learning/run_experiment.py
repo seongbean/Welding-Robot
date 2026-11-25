@@ -5,7 +5,7 @@ GitHub Actions를 못 쓸 때 PC(Windows 포함)에서 쓰려고 만들었다. �
 
 사용법 (저장소 루트에서)
   python -m learning.run_experiment --episodes exp/episodes --out exp --jobs 8
-  python -m learning.run_experiment --exp 20251123-kin-4fam --jobs 8   # outputs/experiments/<ID>/episodes → 같은 폴더
+  python -m learning.run_experiment --exp 20261123-kin-4fam --jobs 8   # outputs/experiments/<ID>/episodes → 같은 폴더
 
 - 변환: exp/data (episodes/batch_report.json에서 점검 실패한 에피소드는 뺌)
 - 학습: mlp_all(네 군), mlp_3(T+코너+V홈), mlp_pipe(파이프만), mlp_all_q(네 군, 학습 수를 mlp_3과 같게), gru_all

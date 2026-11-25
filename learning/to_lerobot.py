@@ -5,7 +5,7 @@
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small
   python -m learning.to_lerobot episodes/t_small --out datasets/t_small --no-lerobot   # frames.npz만
   python -m learning.to_lerobot episodes/t episodes/corner --out datasets/t_corner     # 여러 시편군을 한 데이터로
-  python -m learning.to_lerobot --exp 20251201-weave --no-lerobot   # <실험>/episodes → <실험>/data
+  python -m learning.to_lerobot --exp 20261201-weave --no-lerobot   # <실험>/episodes → <실험>/data
 
 - 관측·행동 정의는 learning/features.py (관측 61개, 행동 7개).
 - 묶음 실행 보고서(<에피소드 폴더>/batch_report.json)가 있으면 점검에 실패한 에피소드는 뺀다.

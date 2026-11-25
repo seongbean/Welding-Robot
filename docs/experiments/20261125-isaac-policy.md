@@ -1,10 +1,10 @@
 # 공용 MLP가 Isaac opti3를 직접 모는 닫힌 루프 (진행 중)
 
-실험 ID `20251125-isaac-policy` · [실험 기록 목록](README.md) · 실행기 사용법은 [sim_bridge/README.md](../../sim_bridge/README.md) "학습 정책으로 몰기"
+실험 ID `20261125-isaac-policy` · [실험 기록 목록](README.md) · 실행기 사용법은 [sim_bridge/README.md](../../sim_bridge/README.md) "학습 정책으로 몰기"
 
 ## 왜
 
-지금까지 정책 평가([20251123-kin-4fam](20251123-kin-4fam.md))는 운동학 닫힌 루프였다. 로봇이 명령을 바로 따라간다고 가정해서
+지금까지 정책 평가([20261123-kin-4fam](20261123-kin-4fam.md))는 운동학 닫힌 루프였다. 로봇이 명령을 바로 따라간다고 가정해서
 Isaac 관절 추종 오차가 정책 관측과 결과에 들어가지 않았다. 이번에는 네 군 공용 MLP(`mlp_all`)가 규칙 전문가 자리에서 매 주기
 보정값을 내고, 그 값으로 Isaac의 opti3를 직접 몬다. 함께 미뤄 둔 화면 확인(필릿 모재 20 cm 옮긴 배치, 파이프 모양, 팔·토치가
 모재를 뚫는지)도 이 실행기 화면으로 본다. 이 실행기가 다음 단계인 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집의 바탕이다.
@@ -18,7 +18,7 @@ Isaac 관절 추종 오차가 정책 관측과 결과에 들어가지 않았다.
   (기본 입력 `section,profile,progress,mode`에는 토치 자세가 없어 지금 정책에는 영향이 없다). 토치 롤은 전문가처럼 홈 자세 툴 x축에 맞춘다.
 - 시나리오: 운동학 실험의 시험 나눔 240개(T 59, 코너 60, V홈 60, 파이프 61, 가혹 30씩 포함). 운동학 평가와 같은 시나리오라
   에피소드마다 바로 비교된다. 센서 노이즈 시드만 다르다(이름마다 고정).
-  Isaac 검증용 1/5 묶음(`20251124-isaac-4fam/batch`)은 같은 시드로 뽑은 앞쪽 시나리오라 학습 나눔과 겹칠 수 있어 쓰지 않는다.
+  Isaac 검증용 1/5 묶음(`20261124-isaac-4fam/batch`)은 같은 시드로 뽑은 앞쪽 시나리오라 학습 나눔과 겹칠 수 있어 쓰지 않는다.
 - 오차: **측정** = 실측 토치(FK) − 실제 이음매(좌우는 명령한 위빙을 뺌), **명령** = 정책 보정 − 실제 이음매(운동학 평가와 같은 정의).
   완벽 추종이면 명령 오차가 운동학 닫힌 루프와 똑같이 나오는 것을 테스트로 확인했다(`learning/test/test_policy_driver.py`).
   추종 95%(실측 팁과 목표 사이 거리), 뒤짐(이음매 방향으로 실측이 명령보다 늦은 평균)도 본다.
@@ -32,8 +32,8 @@ git checkout claude/project-thread-squds7
 git pull
 conda activate weld
 set URDF=C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
-set K=outputs\experiments\20251123-kin-4fam
-set E=20251125-isaac-policy
+set K=outputs\experiments\20261123-kin-4fam
+set E=20261125-isaac-policy
 ```
 
 PR이 머지됐으면 `git checkout main` 후 `git pull`.
@@ -67,7 +67,7 @@ C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --lockstep --headless
 python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenarios %K%\episodes --kin-eval %K%\runs\mlp_all\eval.json --exp %E% --follower-urdf %URDF%
 ```
 
-멈추면 같은 명령으로 이어서 한다. 끝에 시편군별 표(측정·명령·운동학)가 나오고 `outputs\experiments\20251125-isaac-policy\runs\mlp_all\isaac\eval_isaac.json`에 저장된다.
+멈추면 같은 명령으로 이어서 한다. 끝에 시편군별 표(측정·명령·운동학)가 나오고 `outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac\eval_isaac.json`에 저장된다.
 먼저 짧게 보려면 `--per-family 5`를 붙인다(20개, 약 10분). 같은 폴더에 이어서 쌓이므로 그다음 전체 명령을 그대로 돌리면 된다.
 
 **3. (선택) 규칙 기준선을 Isaac에서:** `--policy rule --kin-eval %K%\runs\rule\eval.json`으로 같은 명령. 정책과 규칙의 차이가 Isaac에서도 그대로인지 본다.

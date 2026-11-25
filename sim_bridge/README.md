@@ -64,9 +64,9 @@ python sim_bridge\leader_to_sim.py --mock --follower-urdf C:\workspace\indy-ros2
 모재 자동 배치·이음매 IK 도달 확인·시작 자세 바로 놓기·lockstep·기록은 `run_batch.py`와 같다. 정책 관측의 토치 자세는 Isaac 실측이다.
 
 ```bat
-set K=outputs\experiments\20251123-kin-4fam
+set K=outputs\experiments\20261123-kin-4fam
 python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenarios %K%\episodes ^
-    --kin-eval %K%\runs\mlp_all\eval.json --exp 20251125-isaac-policy --follower-urdf C:\...\opti3.urdf
+    --kin-eval %K%\runs\mlp_all\eval.json --exp 20261125-isaac-policy --follower-urdf C:\...\opti3.urdf
 ```
 
 - 시나리오는 `*.json` 또는 에피소드 `*.npz` 폴더에서 `--split`(기본 test)만 쓴다. 운동학 실험의 에피소드 폴더를 주면 운동학 평가와 같은 시험 시나리오다.

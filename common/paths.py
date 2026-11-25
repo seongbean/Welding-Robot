@@ -49,7 +49,7 @@ def outputs_root() -> Path:
 def check_exp_id(exp_id: str) -> str:
     """실험 ID 형식 확인: YYYYMMDD-<이름> (이름은 소문자·숫자·_·-·.). 맞으면 그대로 돌려준다."""
     if not _EXP_ID.match(exp_id):
-        raise ValueError(f'실험 ID는 YYYYMMDD-<이름> 형식이어야 합니다 (예: 20251201-weave): {exp_id!r}')
+        raise ValueError(f'실험 ID는 YYYYMMDD-<이름> 형식이어야 합니다 (예: 20261201-weave): {exp_id!r}')
     _dt.datetime.strptime(exp_id[:8], '%Y%m%d')
     return exp_id
 

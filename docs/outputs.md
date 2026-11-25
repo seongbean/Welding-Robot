@@ -20,7 +20,7 @@ outputs/
 └── scratch/                          단독 시나리오·디버그. 지워도 되는 것
 ```
 
-- **실험 ID**: `YYYYMMDD-<이름>`, 이름은 소문자·숫자·`-`·`_`·`.` (예: `20251123-kin-4fam`, `20251124-isaac-4fam`).
+- **실험 ID**: `YYYYMMDD-<이름>`, 이름은 소문자·숫자·`-`·`_`·`.` (예: `20261123-kin-4fam`, `20261124-isaac-4fam`). 날짜는 실험을 시작한 날의 연월일입니다(여러 날에 걸쳐도 첫날 ID를 계속 씁니다).
   `docs/experiments/`의 결과 기록도 같은 ID를 씁니다.
 - 하위 폴더 이름은 `learning/run_experiment.py`가 이미 쓰는 배치(`data/`, `runs/`, `report.md`)와 같습니다.
   한 실험에 변형이 여럿이면 `episodes_prof/`, `data_prof/`처럼 접미사를 붙입니다.
@@ -32,7 +32,7 @@ outputs/
 그 경로가 우선합니다. `--exp`를 주지 않으면 예전과 똑같이 동작하고 manifest도 쓰지 않습니다.
 
 ```bash
-E=20251201-weave
+E=20261201-weave
 python -m sim_errors.make_scenarios --batch --scale 0.2 --exp $E          # → batch/
 python sim_bridge/run_batch.py --exp $E --kinematic --jobs 4                # batch/ → episodes/
 python sim_bridge/run_batch.py --exp $E --reach-only --follower-urdf ...   # batch/ → reach/
@@ -71,10 +71,12 @@ python -m learning.run_experiment --exp $E --jobs 8                         # �
 
 | 옛 경로 | 새 경로 |
 | --- | --- |
-| `exp/` | `outputs/experiments/20251123-kin-4fam/` |
-| `exp_isaac/` (`episodes/` → `episodes_isaac/`) | `outputs/experiments/20251124-isaac-4fam/` |
+| `exp/` | `outputs/experiments/20261123-kin-4fam/` |
+| `exp_isaac/` (`episodes/` → `episodes_isaac/`) | `outputs/experiments/20261124-isaac-4fam/` |
 | `github-evals/` | `outputs/ci/` |
-| `batches/t_small`, `episodes/t_small(_prof)`, `datasets/t_small(_prof)`, `runs/` | `outputs/experiments/20251118-t-small/` |
-| `scenarios/`, `scenarios_single/`, `episodes/*.npz` | `outputs/scratch/20251117-single-checks/` |
+| `batches/t_small`, `episodes/t_small(_prof)`, `datasets/t_small(_prof)`, `runs/` | `outputs/experiments/20261118-t-small/` |
+| `scenarios/`, `scenarios_single/`, `episodes/*.npz` | `outputs/scratch/20261117-single-checks/` |
 
 옛 이름은 `.gitignore`에 남아 있어, 예전 명령으로 다시 생겨도 커밋되지 않습니다.
+
+처음에는 실험 ID 연도를 2025로 잘못 붙였습니다(`20251123-kin-4fam` 등). 실험은 모두 2026년 11월에 한 것이라 2026-11-25에 연도만 2026으로 바꿨습니다. 옛 ID가 보이면 앞 네 자리만 2026으로 읽으면 됩니다.

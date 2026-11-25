@@ -1,6 +1,6 @@
 # 첫 한 바퀴 결과 (운동학 데이터, 2026-11-17)
 
-실험 ID `20251117-t-first-loop` · [실험 기록 목록](README.md) · 사용법은 [learning/README.md](../../learning/README.md)
+실험 ID `20261117-t-first-loop` · [실험 기록 목록](README.md) · 사용법은 [learning/README.md](../../learning/README.md)
 
 Isaac 대신 운동학 에피소드 66개(1/5 수량: 깨끗함 6, 단독 13, 혼합 41, 가혹 6)로 흐름 전체를 돌렸다. 학습 48, 검증 6, 시험 12(가혹 6 포함). 학습은 CPU로 정책 하나에 10초 안쪽.
 
