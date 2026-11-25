@@ -118,6 +118,7 @@ $$
 | `FollowerStepper` ([`follower_control.py`](../weld_teleop/weld_teleop/follower_control.py)) | opti3 IK, 관절 속도 제한, 추적 오차·리밋 정지 | 그대로 사용. 공유 제어 진입 시 내부 명령값을 실측값으로 동기화 |
 | `TeleopLoop` ([`teleop_loop.py`](../weld_teleop/weld_teleop/teleop_loop.py)) | 리더 FK → 매핑 → IK 1주기, 도달 범위 밖에서 재기준 | 상태기계의 단계 전이와 정책 입력을 받는 루프로 확장 |
 | [`sim_bridge/`](../sim_bridge/) | Isaac Sim 6.1 UDP 연결, Enter 키 클러치, 목표 마커 | 시험 환경으로 계속 사용 |
+| 공유 제어 ([`shared_control.py`](../learning/shared_control.py), [`shared_to_sim.py`](../sim_bridge/shared_to_sim.py)) | 고정 기본 정책(base-v1) + 리더 사람 보정, 그리퍼 클러치, 유지 오프셋, 초기화 버튼, 시작 트리거, 개입 기록 | Isaac 시뮬에서 개입 데이터 수집. 잔차 모델 학습은 다음 단계 |
 
 새로 필요한 것은 시작 트리거, 단계 상태기계(전이 조건과 임계값), 이음매 경로 계층(시뮬에서는 USD 모재에서 추출), 보정 정책과 잔차 모델의 추론 연결, 이음매 좌표 변환, LeRobotDataset 기록, 클러치 장치와 오프셋 초기화 버튼입니다.
 

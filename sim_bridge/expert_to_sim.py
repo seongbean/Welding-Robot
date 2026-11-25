@@ -187,14 +187,32 @@ def place_robot(link: SimLink, q_start: np.ndarray, scene: dict, reset_id: int, 
     return False
 
 
+def hold_until_start(link: SimLink, stepper: FollowerStepper, scene: dict, reset_id: int, wait_start) -> bool:
+    """지금 관절 명령을 계속 보내(lockstep 응답 포함) 자세를 유지하다가 wait_start()가 True면 True, 'stop'이면 False."""
+    while True:
+        go = wait_start()
+        if go == 'stop':
+            return False
+        if go:
+            return True
+        msg = link.recv_latest(0.1)
+        if msg is None or msg.get('reset_id', reset_id) != reset_id:
+            continue
+        stepper.on_measured(msg['q'], float(msg['t']))
+        q = stepper.q_cmd if stepper.q_cmd is not None else msg['q']
+        link.send(q, scene=scene, ack=msg.get('seq'), reset_id=reset_id)
+
+
 def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_path: str, *, home_q: np.ndarray,
                 use_scenario_pose: bool = False, sensor_seed: int = 0, reset_id: int = 1, max_time: float = 400.0,
-                log=print, make_driver=None) -> tuple[Recorder, dict, str]:
+                log=print, make_driver=None, wait_start=None) -> tuple[Recorder, dict, str]:
     """에피소드 하나. 반환 (기록, 모재 배치가 반영된 시나리오, 결과: done | reach | place | ik_failed | timeout | stopped).
 
     make_driver(model, expert): 규칙 전문가 대신 토치 목표를 낼 구동기를 만든다 (policy_to_sim.py의 학습 정책).
     구동기는 step(dt, T_meas) → 전문가 step()과 같은 필드의 dict(+ 'extra': 기록에 더할 필드)와 done을 가진다.
-    배치·도달 확인·시작 자세·lockstep·기록은 전문가 실행과 같다."""
+    배치·도달 확인·시작 자세·lockstep·기록은 전문가 실행과 같다.
+    wait_start(): 시작 자세에 놓은 뒤 True를 돌려줄 때까지 그 자세를 유지하며 기다린다 (공유 제어의 시작 트리거).
+    'stop'을 돌려주면 시작하지 않고 결과 stopped. 구동기에 stopped가 참이면 결과도 stopped."""
     kin = stepper.kin
     model = PartErrorModel(scn)
     T_home = kin.fk(home_q).homogeneous
@@ -224,6 +242,8 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
     else:
         link.send(home_q, scene=scene)
     stepper.target = None
+    if wait_start is not None and not hold_until_start(link, stepper, scene, reset_id, wait_start):
+        return rec, model.scn, 'stopped'
 
     t_prev = None
     t_print = 0.0
@@ -263,7 +283,8 @@ def run_episode(link: SimLink, stepper: FollowerStepper, scn: dict, scenario_pat
             result = 'ik_failed'
             break
         if (driver or expert).done:
-            result = 'done' if r['done'] else 'timeout'     # 정책 구동기는 시간 한도로도 멈춘다
+            result = ('done' if r['done'] else 'stopped' if getattr(driver, 'stopped', False)
+                      else 'timeout')     # 정책 구동기는 시간 한도로도 멈춘다
             break
         if time.monotonic() - t_print > 0.2:
             err = np.linalg.norm(T_meas[:3, 3] - r['T_target'][:3, 3]) * 1e3

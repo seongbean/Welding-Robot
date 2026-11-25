@@ -88,6 +88,33 @@ python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenari
 python sim_bridge\clearance_check.py outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac --follower-urdf C:\...\opti3.urdf
 ```
 
+## 6. 공유 제어: 기본 정책 + 리더 보정, 개입 기록
+
+`shared_to_sim.py`는 정책 실행기와 같은 시나리오·배치·lockstep 위에서, 고정한 기본 정책(base-v1, [docs/policies.md](../docs/policies.md))이
+용접하는 동안 SO-102 리더로 보정을 더하고 개입 에피소드를 기록한다. 규칙은 `learning/shared_control.py`.
+로봇 보정 = 기본 정책 + 잔차 모델(아직 없음, 0) + 사람 보정이고, 기본 정책은 개입 데이터로 다시 학습하지 않는다.
+
+```bat
+:: 터미널 1 (화면을 보며 조작하므로 --headless 없이)
+C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --lockstep
+:: 터미널 2
+set K=outputs\experiments\20261123-kin-4fam
+python sim_bridge\shared_to_sim.py --policy %K%\runs\mlp_all\policy.pt --base-tag base-v1 ^
+    --scenarios %K%\episodes --per-family 1 --port COM3 --exp 20261125-shared ^
+    --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
+```
+
+- 조작 (터미널 2에 포커스): 로봇이 시작 자세에 놓이면 **s = 시작 트리거**, n = 건너뜀. 용접 중 **리더 그리퍼를 쥐고 있는 동안 클러치 ON**
+  (`--clutch key`면 c로 켜고 끔, `--mock`은 항상 key), **r = 오프셋 초기화**(1초 램프), q = 멈춤(대기 중이면 종료).
+- 매핑: 클러치를 잡은 순간 대비 리더 끝 변화를 리더 베이스 축 그대로 이음매 좌표로 읽는다 (x 진행 = 버림, y 좌우, z 높이,
+  x·y축 회전 = 작업각·진행각). 위치 0.25배, 회전 0.5배, 한도 ±5 mm, ±10°. 리더를 놓는 방향이 다르면 `--leader-to-seam-rpy`.
+  `--gain 1,1,0,0`처럼 축별 권한을 끌 수 있다.
+- 놓으면 그때 보정이 유지 오프셋으로 남는다. 리더 읽기가 끊겨도 유지하고, 다시 읽히면 그 자세에서 기준을 잡는다.
+- 출력 `<실험>/runs/base-v1/shared/<시나리오>__<시각>.npz` (멈추거나 못 끝내면 `.failed.npz`). 기본 정책 `base_c`, 잔차 `residual_c`,
+  사람 보정 `human_c`(잔차 정답, 유지 오프셋 포함), 합계 `policy_c`, 클러치·초기화 표시, 10 Hz 정책 관측 `obs`와 meta의 정책 경로·sha256·
+  고정 이름·사람 보정 설정. 끝나면 `eval_isaac.json`(정책 실행기와 같은 오차, 명령 = 합계)과 `interventions.json`(클러치 횟수·시간, 초기화, 사람 보정 크기).
+- 리더 없이 확인: `--port COM3` 대신 `--mock` (사인파 리더, c로 클러치).
+
 ## 확인 안 된 것
 
 - `opti3.urdf` 경로: indy-ros2-jazzy 안의 실제 위치로 바꿔 쓴다(xacro만 있으면 알려 줄 것).

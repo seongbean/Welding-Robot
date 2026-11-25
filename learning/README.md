@@ -93,5 +93,6 @@ GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)�
 - 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값을 맞추고, V홈에서 판 윗면 단차 측정이 되는지 확인한다. 시작 구간 스캔 자세의 노이즈도 따로 잰다.
 - 이전 Isaac 기록은 `python -m sim_errors.resense`로 지금 센서 설정(스캔 포함)을 넣은 뒤 다시 변환한다.
 - Isaac 기록(코너·V홈·파이프 1/5 묶음, [20261124-isaac-4fam](../docs/experiments/20261124-isaac-4fam.md))으로 학습·평가해 운동학 결과와 비교.
-- 공용 MLP의 Isaac 닫힌 루프는 끝났다(시험 240개 모두 완료, 명령 오차 = 운동학, 뚫음 없음, [20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 남은 것: 같은 실행기로 규칙 기준선, 그 위에 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집.
+- 공용 MLP의 Isaac 닫힌 루프는 끝났다(시험 240개 모두 완료, 명령 오차 = 운동학, 뚫음 없음, [20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 남은 것: 같은 실행기로 규칙 기준선.
+- 공유 제어 실행기(`sim_bridge/shared_to_sim.py`, 규칙은 `learning/shared_control.py`)로 base-v1 위 개입 에피소드를 모은 뒤, `residual_frames`로 뽑은 프레임으로 잔차 모델을 학습한다 (학습 코드는 다음 단계).
 - 파이프의 다른 자세(관 아래쪽까지 5G 전체, 세운 관 2G).
