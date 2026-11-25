@@ -127,9 +127,13 @@ def build_report(out: str, policy: str, kin_eval: str | None = None) -> dict:
     """out 폴더의 에피소드 .npz → eval_isaac.json (시편군·강도별 측정·명령·운동학 요약)."""
     kin = kin_rows(kin_eval)
     rows, failed = [], sorted(os.path.basename(p) for p in glob.glob(os.path.join(out, '*.failed.npz')))
-    for p in sorted(glob.glob(os.path.join(out, '*.npz'))):
-        if p.endswith('.failed.npz'):
-            continue
+    files = sorted(p for p in glob.glob(os.path.join(out, '*.npz')) if not p.endswith('.failed.npz'))
+    if files:
+        print(f'\n요약 계산: 에피소드 {len(files)}개 (기록 주기마다 오차를 다시 재서 하나에 몇 초씩 걸림)', flush=True)
+    t0 = time.time()
+    for k, p in enumerate(files, 1):
+        if k % 10 == 0 or k == len(files):
+            print(f'  [{k}/{len(files)}] {os.path.basename(p)}, {time.time() - t0:.0f} s', flush=True)
         rec, scn, meta = load_episode(p)
         if 'policy_c' not in rec:
             continue

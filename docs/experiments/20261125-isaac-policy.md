@@ -71,7 +71,9 @@ C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --lockstep --headless
 python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenarios %K%\episodes --kin-eval %K%\runs\mlp_all\eval.json --exp %E% --follower-urdf %URDF%
 ```
 
-멈추면 같은 명령으로 이어서 한다. 끝에 시편군별 표(측정·명령·운동학)가 나오고 `outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac\eval_isaac.json`에 저장된다.
+멈추면 같은 명령으로 이어서 한다. 마지막 에피소드 뒤에 저장된 기록 전부로 오차를 다시 재느라 10분 남짓 더 걸리고(에피소드당 2~4 s,
+Isaac은 쉬고 있음), 그다음 시편군별 표(측정·명령·운동학)가 나오며 `outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac\eval_isaac.json`에 저장된다.
+이 계산이 중간에 끊겨도 에피소드는 저장돼 있어서 같은 명령에 `--report-only`를 붙이면 Isaac 없이 표만 다시 낸다.
 먼저 짧게 보려면 `--per-family 5`를 붙인다(20개, 약 10분). 같은 폴더에 이어서 쌓이므로 그다음 전체 명령을 그대로 돌리면 된다.
 
 **3. 팔·토치–모재 간격 점검 (Isaac 불필요, 에피소드당 몇 초).** 모재는 충돌이 없어 뚫어도 시뮬레이션이 막지 않으므로 저장된 관절 실측으로 잰다.
