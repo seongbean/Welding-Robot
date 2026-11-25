@@ -56,7 +56,7 @@ def main(argv=None):
     ap.add_argument('--n', type=int, default=10, help='시나리오(모재) 개수')
     ap.add_argument('--passes', type=int, default=1, help='모재당 패스 수 (2 이상이면 잔류 변형을 다음 패스로 넘김)')
     ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--out', help='출력 폴더 (기본: --exp면 <실험>/batch, 아니면 scenarios)')
+    ap.add_argument('--out', help='출력 폴더 (기본: --exp면 <실험>/batch, 아니면 outputs/scratch/scenarios)')
     ap.add_argument('--summary-only', action='store_true', help='파일을 쓰지 않고 분포 요약만')
     ap.add_argument('--single', help=f'단독 검증 시나리오: all 또는 쉼표로 ({", ".join(SINGLE_ERRORS)})')
     ap.add_argument('--batch', action='store_true', help='학습용 묶음 (config episode 섹션)')
@@ -65,7 +65,7 @@ def main(argv=None):
     paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
     if not args.out:
-        args.out = str(paths.exp_dir(args.exp, 'batch')) if args.exp else 'scenarios'
+        args.out = str(paths.exp_dir(args.exp, 'batch') if args.exp else paths.scratch_dir('scenarios'))
     if not args.summary_only:
         paths.record_stage(args.exp, 'make_scenarios', out=args.out, config=args.config,
                            config_sha256=paths.file_sha256(args.config), family=args.family, seed=args.seed,

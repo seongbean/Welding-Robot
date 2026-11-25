@@ -9,7 +9,7 @@
   `episodes_isaac/<시편군>/`, `data/`, `runs/<정책>/`, `report.md`를 둡니다.
 - 명령에 `--exp <ID>`를 주면 경로가 이 배치로 채워지고 `manifest.json`에 기록됩니다 (docs/outputs.md "쓰는 법").
 - 저장소 루트나 소스 폴더에 산출물 폴더(`exp`, `episodes`, `runs` 등)를 새로 만들지 않습니다.
-  옛 이름 `exp`, `exp_isaac`, `github-evals`는 `outputs/` 아래로 가는 임시 정션입니다.
+  경로를 주지 않은 단독 실행은 `outputs/scratch/`에 씁니다.
 - 산출물(.npz, .pt, .parquet, 에피소드, 데이터셋)은 커밋하지 않습니다.
 
 ## 문서

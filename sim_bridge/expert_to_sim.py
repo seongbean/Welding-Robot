@@ -6,7 +6,7 @@
 함께 보내므로 receiver가 재시작 없이 모재를 바꾸고 변형을 같은 진행도로 그린다. 여러 개는 run_batch.py.
 
 사용법 (저장소 루트에서, pinocchio가 설치된 conda 환경)
-  터미널 1: C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --usd ...\\posco_torch.usd
+  터미널 1: C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py
   터미널 2: python sim_bridge/expert_to_sim.py --scenario scenarios/part0000_pass0.json --follower-urdf C:/.../opti3.urdf
 
 - 시간: receiver가 보내는 시뮬 시각으로 전문가를 진행한다. 실측 하나에 한 주기라서, Isaac이 멈추면 전문가도
@@ -16,7 +16,7 @@
 - 시작 전에 이음매 전체에 대해 IK 도달 여부를 확인하고, 안 되면 시작하지 않는다.
 - 용접 구간만 담는 시나리오(episode.weld_only, make_scenarios --batch)는 로봇을 이음매 시작점 + 시작 어긋남
   관절 자세로 바로 놓고(reset_q) 자리 잡으면 용접부터 시작한다. 아니면 지금 자세에서 접근부터 한다.
-- 기록: --out(기본 episodes/<시나리오 이름>.npz). 필드 설명은 sim_errors/README.md.
+- 기록: --out(기본 outputs/scratch/episodes/<시나리오 이름>.npz). 필드 설명은 sim_errors/README.md.
 """
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ for p in (REPO, PKG):
 
 import pinocchio as pin  # noqa: E402
 
+from common import paths  # noqa: E402
 from sim_errors.episode import Recorder  # noqa: E402
 from sim_errors.expert import ScriptedExpert, isaac_nominal  # noqa: E402
 from sim_errors.part_errors import PartErrorModel, load_scenario  # noqa: E402
@@ -282,12 +283,12 @@ def main():
     ap.add_argument('--send', default='127.0.0.1:9870')
     ap.add_argument('--listen', default='127.0.0.1:9871')
     ap.add_argument('--sensor-seed', type=int, default=0, help='단면 센서 노이즈 난수 시드')
-    ap.add_argument('--out', help='기록 파일 (.npz). 기본 episodes/<시나리오 이름>.npz')
+    ap.add_argument('--out', help='기록 파일 (.npz). 기본 outputs/scratch/episodes/<시나리오 이름>.npz')
     args = ap.parse_args()
 
     scn = load_scenario(args.scenario)
     stepper = build_stepper(args.follower_config, args.follower_urdf)
-    out_path = args.out or os.path.join('episodes', os.path.splitext(os.path.basename(args.scenario))[0] + '.npz')
+    out_path = args.out or str(paths.scratch_dir('episodes') / (os.path.splitext(os.path.basename(args.scenario))[0] + '.npz'))
     link = SimLink(args.listen, args.send, stepper.kin.nq)
     print(f'시나리오 {args.scenario} (패스 {scn.get("pass_index", 0)}) → Isaac Sim {args.send}')
     rec, scn_out, result = Recorder(), scn, 'stopped'

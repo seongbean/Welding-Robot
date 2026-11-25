@@ -36,11 +36,12 @@ def test_make_scenarios_exp_writes_batch_and_manifest(root):
     assert len(st['extra']['config_sha256']) == 64
 
 
-def test_make_scenarios_default_out_unchanged(tmp_path, monkeypatch, root):
+def test_make_scenarios_default_out_is_scratch(tmp_path, monkeypatch, root):
     from sim_errors import make_scenarios
     monkeypatch.chdir(tmp_path)
     make_scenarios.main(['--n', '1'])
-    assert os.listdir(tmp_path / 'scenarios') == ['part0000_pass0.json']
+    assert os.listdir(paths.scratch_dir('scenarios')) == ['part0000_pass0.json']
+    assert not (tmp_path / 'scenarios').exists()   # 현재 폴더에 만들지 않음
     assert not (root / 'experiments').exists()   # --exp 없으면 manifest도 안 씀
 
 

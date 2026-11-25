@@ -21,18 +21,18 @@ Isaac Sim에서 모재 오차를 용접 전·중·후로 나눠 분포로 주입
 저장소 루트에서, `conda activate weld` 환경 기준.
 
 1. 분포 확인: `python -m sim_errors.make_scenarios --n 500 --summary-only`
-2. 시나리오 생성: `python -m sim_errors.make_scenarios --n 20 --out scenarios` (다층 용접은 `--passes 3`)
+2. 시나리오 생성: `python -m sim_errors.make_scenarios --n 20` (기본 출력 `outputs/scratch/scenarios`, 다층 용접은 `--passes 3`)
 3. Isaac Sim (터미널 1):
    ```bat
-   C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --usd C:\...\posco_torch.usd --scenario scenarios\part0000_pass0.json
+   C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --scenario outputs\scratch\scenarios\part0000_pass0.json
    ```
 4. 규칙 전문가 (터미널 2):
    ```bat
-   python sim_bridge\expert_to_sim.py --scenario scenarios\part0000_pass0.json --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
+   python sim_bridge\expert_to_sim.py --scenario outputs\scratch\scenarios\part0000_pass0.json --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
    ```
-   시작 자세의 토치 팁 근처에 모재를 자동 배치하고, 이음매 전체에 IK가 닿는지 확인한 뒤 시작한다. 끝나면 `episodes/part0000_pass0.npz`에 기록한다.
+   시작 자세의 토치 팁 근처에 모재를 자동 배치하고, 이음매 전체에 IK가 닿는지 확인한 뒤 시작한다. 끝나면 `outputs/scratch/episodes/part0000_pass0.npz`에 기록한다(`--out`으로 바꿈).
 
-5. 기록 점검: `python -m sim_errors.check_episode episodes\part0000_pass0.npz` (그래프는 `conda install matplotlib` 후 같은 폴더에 .png)
+5. 기록 점검: `python -m sim_errors.check_episode outputs\scratch\episodes\part0000_pass0.npz` (그래프는 `conda install matplotlib` 후 같은 폴더에 .png)
 
 Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경로다. 두 선의 차이가 정답이고, 토치는 빨간 선을 따라간다.
 
@@ -44,19 +44,21 @@ Isaac Sim 화면에서 빨간 선이 실제 이음매, 파란 선이 추정 경�
 혼합 묶음의 절반에는 실행 섭동(좌우·높이 σ 0.5 mm, 각도 σ 1°, 0.5–2초 반 코사인)을 넣고 정답은 섭동 없는 값으로 둔다. 토치 자세를 정책 입력에서 뺀 뒤로는 섭동이 정책 관측을 바꾸지 않아 학습 효과가 없다([수량·섭동 비교](../docs/experiments/20251118-t-quantity-perturb.md)). Isaac 추종 상태를 다양하게 하려고 그대로 둔다.
 개수·비율·어긋남·섭동은 `config/part_errors.yaml`의 `episode` 섹션.
 
-1. 시나리오: `python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches/t_small` (1/5 수량 66개. 전체는 `--scale` 빼기)
+실험 ID 하나(예: `20251201-t-small`)로 모든 단계를 `outputs/experiments/<ID>/` 아래에 둔다 ([산출물 규약](../docs/outputs.md)).
+
+1. 시나리오: `python -m sim_errors.make_scenarios --batch --scale 0.2 --exp 20251201-t-small` (→ `batch/`, 1/5 수량 66개. 전체는 `--scale` 빼기)
 2. Isaac Sim (터미널 1, 한 번만 띄움. `--scenario` 없이):
    ```bat
-   C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --usd C:\...\posco_torch.usd --lockstep
+   C:\isaacsim\python.bat sim_bridge\isaac_opti3_receiver.py --lockstep
    ```
 3. 일괄 실행 (터미널 2):
    ```bat
-   python sim_bridge\run_batch.py batches\t_small --out episodes\t_small --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
+   python sim_bridge\run_batch.py --exp 20251201-t-small --group t --follower-urdf C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
    ```
-   중단해도 같은 명령으로 이어서 만든다(있는 .npz는 건너뜀). 끝나면 강도별 통계와 `episodes\t_small\batch_report.json`.
+   중단해도 같은 명령으로 이어서 만든다(있는 .npz는 건너뜀). 끝나면 강도별 통계와 `episodes_isaac\t\batch_report.json`.
    점검에 실패한 에피소드는 보고서에 이유가 남고 학습 변환에서 빠진다. 끝나지 않은 실행은 `*.failed.npz`.
-4. Isaac 없이 흐름만 시험: `python sim_bridge/run_batch.py batches/t_small --out episodes/t_small_kin --kinematic --jobs 4`
-5. Isaac을 띄우기 전 도달 점검: `python sim_bridge\run_batch.py batches\t_small --out reach --reach-only --follower-urdf ...\opti3.urdf`
+4. Isaac 없이 흐름만 시험: `python sim_bridge/run_batch.py --exp 20251201-t-small --kinematic --jobs 4` (→ `episodes/`)
+5. Isaac을 띄우기 전 도달 점검: `python sim_bridge\run_batch.py --exp 20251201-t-small --reach-only --follower-urdf ...\opti3.urdf` (→ `reach/`)
    시나리오마다 자동 배치 후 이음매 41점과 시작 자세의 opti3 IK만 풀어 본다(Isaac 불필요, 수백 개에 몇 분).
    최대 IK 오차, 이웃 점 사이 관절 최대 변화(0.3 rad 이상이면 손목 뒤집힘으로 실패), 리밋 여유, 시편군별 관절 범위를
    찍고 `reach\reach_report.json`에 남긴다. 여기서 실패한 시나리오는 Isaac에서도 `reach`로 끝난다.
@@ -127,12 +129,15 @@ poscoenc 시편의 선택 V홈은 아직 넣지 않았다. 여러 군 에피소�
 
 운동학 에피소드는 완벽 추종이라 opti3 도달 범위와 Isaac 관절 추종을 보지 않는다. 시편군마다 1/5 묶음(약 67개)으로 본다.
 
-1. 시나리오: `for %f in (fillet_corner butt_v pipe_girth) do python -m sim_errors.make_scenarios --batch --scale 0.2 --family %f --out exp_isaac\batch`
-2. 도달 점검: `python sim_bridge\run_batch.py exp_isaac\batch --out exp_isaac\reach --reach-only --follower-urdf ...\opti3.urdf`
+결과는 실험 `20251124-isaac-4fam`(`outputs/experiments/20251124-isaac-4fam/`)에 있다.
+
+1. 시나리오: `for %f in (fillet_corner butt_v pipe_girth) do python -m sim_errors.make_scenarios --batch --scale 0.2 --family %f --exp 20251124-isaac-4fam`
+2. 도달 점검: `python sim_bridge\run_batch.py --exp 20251124-isaac-4fam --reach-only --follower-urdf ...\opti3.urdf`
 3. 화면 확인 (receiver를 `--headless` 없이): 군마다 `--only pipe_clean --limit 1`처럼 하나씩 돌려, 모재가 토치 아래에 놓이고
    토치 끝이 빨간 선을 따라가는지 본다. 파이프는 토치가 호를 따라 ±50° 기운다.
-4. 일괄 (`--headless --lockstep`): `python sim_bridge\run_batch.py exp_isaac\batch --only pipe_ --out exp_isaac\episodes\pipe --follower-urdf ...`
-   (`corner_`, `butt_`도 같게). 군마다 `batch_report.json`.
+4. 일괄 (`--headless --lockstep`): `python sim_bridge\run_batch.py --exp 20251124-isaac-4fam --only pipe_ --group pipe --follower-urdf ...`
+   (`corner_` → `--group corner`, `butt_` → `--group butt`도 같게). 군마다 `episodes_isaac\<군>\batch_report.json`.
+   T 필릿 1/5 묶음은 같은 실험의 `batch_t/`에 있다: `python sim_bridge\run_batch.py outputs\experiments\20251124-isaac-4fam\batch_t --exp 20251124-isaac-4fam --group t --follower-urdf ...`
 
 판정 기준은 T 필릿 Isaac 실행(66개 모두 통과, 추종 95% 약 0.55 mm)과 같다: 모두 통과, 추종 95% 2 mm 미만, IK 경고 비율, 용접 시간.
 
@@ -158,8 +163,8 @@ poscoenc 시편의 선택 V홈은 아직 넣지 않았다. 여러 군 에피소�
 센서 모델을 바꿨을 때 이미 만든 에피소드는 Isaac을 다시 돌리지 않고 단면 열만 다시 계산한다(단면 값은 시나리오와 진행도만으로 정해짐).
 
 ```bat
-python -m sim_errors.resense episodes\t_small --out episodes\t_small_prof
-python sim_bridge\run_batch.py batches\t_small --out episodes\t_small_prof --report-only
+python -m sim_errors.resense outputs\experiments\20251118-t-small\episodes --out outputs\experiments\20251118-t-small\episodes_prof
+python sim_bridge\run_batch.py outputs\experiments\20251118-t-small\batch --out outputs\experiments\20251118-t-small\episodes_prof --report-only
 ```
 
 ## 오차별 단독 검증

@@ -339,7 +339,7 @@ def main(argv=None):
     ap.add_argument('--name', help='결과 파일 이름 eval_<name>.json (기본 eval.json)')
     ap.add_argument('--splits', default='test', help='평가할 나눔 (쉼표로, 예: test,val)')
     ap.add_argument('--jobs', type=int, default=1, help='닫힌 루프 병렬 프로세스 수')
-    ap.add_argument('--rule-dir', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json). 기본 runs, --exp면 <실험>/runs')
+    ap.add_argument('--rule-dir', help='규칙 기준선 결과 폴더 (<폴더>/rule/eval.json). 기본 outputs/scratch/runs, --exp면 <실험>/runs')
     paths.add_exp_arg(ap)
     args = ap.parse_args(argv)
     if args.exp:
@@ -349,7 +349,7 @@ def main(argv=None):
         args.rule_dir = args.rule_dir or str(runs)
         # 경로가 아닌 정책 이름(예: mlp_all)은 <실험>/runs/<이름>/policy.pt
         args.policies = [p if p in RULES or os.path.exists(p) else str(runs / p / 'policy.pt') for p in args.policies]
-    args.rule_dir = args.rule_dir or 'runs'
+    args.rule_dir = args.rule_dir or str(paths.scratch_dir('runs'))
     if not args.data:
         ap.error('--data가 필요합니다 (또는 --exp)')
     paths.record_stage(args.exp, 'evaluate', policies=args.policies, data=args.data, episodes=args.episodes,

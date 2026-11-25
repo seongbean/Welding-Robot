@@ -13,8 +13,8 @@ outputs/
 .venv/
 venv/
 
-# 옛 산출물 경로. 로컬 이전(2026-11-25) 뒤에는 outputs/ 아래로 가는 정션이거나 빈 폴더.
-# 다른 작업이 새 규약으로 옮겨 오면 지운다.
+# 옛 산출물 이름. 2026-11-25에 outputs/로 옮겼고 기본 출력도 outputs/ 아래다.
+# 예전 명령으로 다시 생겨도 커밋되지 않게 남겨 둔다.
 scenarios/
 episodes/
 scenarios_single/
