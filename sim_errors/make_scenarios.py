@@ -11,7 +11,7 @@
   python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches/corner/   # ㄱ자 코너 필릿
   python -m sim_errors.make_scenarios --batch --family butt_v --out batches/butt/           # 맞대기 V홈
   python -m sim_errors.make_scenarios --batch --family pipe_girth --out batches/pipe/       # 파이프 원주
-  python -m sim_errors.make_scenarios --batch --scale 0.2 --exp 20251201-weave             # → outputs/experiments/<ID>/batch
+  python -m sim_errors.make_scenarios --batch --scale 0.2 --exp 20261201-weave             # → outputs/experiments/<ID>/batch
 
 --family는 config families 섹션의 시편군을 고른다 (기본 = geometry.joint, 지금은 fillet_t).
 T 필릿이 아닌 시편군의 묶음 파일 이름에는 군 머리말(corner_, butt_, pipe_)이 붙어, 여러 군 에피소드를 한 폴더에 섞어도

@@ -9,9 +9,9 @@ expert_to_sim.run_episode를 그대로 쓰고 토치 목표를 내는 부분만 
 사용법 (저장소 루트에서, conda activate weld. 정책을 불러오려면 torch 필요)
   터미널 1: C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py --lockstep [--headless]
   터미널 2:
-    set K=outputs\\experiments\\20251123-kin-4fam
+    set K=outputs\\experiments\\20261123-kin-4fam
     python sim_bridge\\policy_to_sim.py --policy %K%\\runs\\mlp_all\\policy.pt --scenarios %K%\\episodes ^
-        --kin-eval %K%\\runs\\mlp_all\\eval.json --exp 20251125-isaac-policy --follower-urdf C:\\...\\opti3.urdf
+        --kin-eval %K%\\runs\\mlp_all\\eval.json --exp 20261125-isaac-policy --follower-urdf C:\\...\\opti3.urdf
 
 - 시나리오: --scenarios 폴더의 *.json(make_scenarios) 또는 에피소드 *.npz(안의 시나리오). --split(기본 test)만 쓴다.
   운동학 실험의 시험 에피소드 폴더를 주면 운동학 평가와 같은 시나리오로 비교된다.

@@ -10,7 +10,7 @@ from common import paths
 from sim_errors.episode import run_kinematic
 from sim_errors.make_scenarios import DEFAULT_CFG, make_batch
 
-EXP = '20251201-cli'
+EXP = '20261201-cli'
 
 
 def test_exp_convert_train_evaluate(tmp_path, monkeypatch):

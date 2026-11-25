@@ -4,7 +4,7 @@
 사용법 (저장소 루트에서)
   python -m learning.evaluate runs/mlp_full/policy.pt --data datasets/t_small --episodes episodes/t_small
   python -m learning.evaluate runs/*/policy.pt --data datasets/t_small --episodes episodes/t_small   # 여러 정책 비교
-  python -m learning.evaluate mlp_all rule --exp 20251201-weave --jobs 8   # <실험>/runs/<이름>/policy.pt, <실험>/data, <실험>/episodes
+  python -m learning.evaluate mlp_all rule --exp 20261201-weave --jobs 8   # <실험>/runs/<이름>/policy.pt, <실험>/data, <실험>/episodes
   python -m learning.evaluate runs/mlp_t/policy.pt --data datasets/t_corner --episodes episodes/t episodes/corner \
       --family fillet_corner --name corner        # T로 학습한 정책을 코너 시험에서 (→ runs/mlp_t/eval_corner.json)
 

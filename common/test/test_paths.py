@@ -22,13 +22,13 @@ def test_env_overrides_root(root):
 
 
 def test_exp_dir_layout(root):
-    assert paths.exp_dir('20251201-weave') == root.resolve() / 'experiments' / '20251201-weave'
-    assert paths.exp_dir('20251201-weave', 'episodes_isaac').name == 'episodes_isaac'
-    p = paths.exp_dir('20251201-weave', 'runs', create=True)
+    assert paths.exp_dir('20261201-weave') == root.resolve() / 'experiments' / '20261201-weave'
+    assert paths.exp_dir('20261201-weave', 'episodes_isaac').name == 'episodes_isaac'
+    p = paths.exp_dir('20261201-weave', 'runs', create=True)
     assert p.is_dir()
 
 
-@pytest.mark.parametrize('bad', ['weave', '2025-12-01-weave', '20251301-x', '20251201-Weave', '20251201-'])
+@pytest.mark.parametrize('bad', ['weave', '2026-12-01-weave', '20261301-x', '20261201-Weave', '20261201-'])
 def test_bad_exp_id(bad):
     with pytest.raises(ValueError):
         paths.check_exp_id(bad)
@@ -36,11 +36,11 @@ def test_bad_exp_id(bad):
 
 def test_unknown_part(root):
     with pytest.raises(KeyError):
-        paths.exp_dir('20251201-weave', 'models')
+        paths.exp_dir('20261201-weave', 'models')
 
 
 def test_new_exp_id():
-    assert paths.new_exp_id('kin-4fam', dt.date(2025, 11, 23)) == '20251123-kin-4fam'
+    assert paths.new_exp_id('kin-4fam', dt.date(2026, 11, 23)) == '20261123-kin-4fam'
 
 
 def test_ci_and_scratch(root):
@@ -51,8 +51,8 @@ def test_ci_and_scratch(root):
 
 
 def test_resolve_out_prefers_explicit_out(root, tmp_path):
-    assert paths.resolve_out(tmp_path / 'x', '20251201-weave', 'batch') == tmp_path / 'x'
-    assert paths.resolve_out(None, '20251201-weave', 'batch') == paths.exp_dir('20251201-weave', 'batch')
+    assert paths.resolve_out(tmp_path / 'x', '20261201-weave', 'batch') == tmp_path / 'x'
+    assert paths.resolve_out(None, '20261201-weave', 'batch') == paths.exp_dir('20261201-weave', 'batch')
     with pytest.raises(ValueError):
         paths.resolve_out(None, None, 'batch')
 

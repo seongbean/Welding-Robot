@@ -12,7 +12,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(REPO, 'sim_bridge'))
 import run_batch  # noqa: E402
 
-EXP = '20251201-test'
+EXP = '20261201-test'
 
 
 @pytest.fixture

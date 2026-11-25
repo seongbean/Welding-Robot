@@ -22,7 +22,7 @@
 저장소 루트에서. Isaac 없이 운동학으로 생성 → 변환 → 학습 → 평가를 한 바퀴 돌립니다 (`pip install numpy pyyaml pin torch`).
 
 ```bash
-E=20251201-try
+E=20261201-try
 python -m sim_errors.make_scenarios --batch --scale 0.2 --exp $E
 python sim_bridge/run_batch.py --exp $E --kinematic --jobs 4
 python -m learning.run_experiment --exp $E --jobs 4      # → outputs/experiments/$E/report.md

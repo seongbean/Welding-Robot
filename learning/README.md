@@ -41,7 +41,7 @@ python -m learning.evaluate runs\mlp\policy.pt runs\mlp_noprofile\policy.pt runs
 
 Isaac 없이 전체 흐름만 볼 때는 두 번째 줄을 `--kinematic --jobs 4`(완벽 추종 가정)로 바꾼다.
 
-경로 대신 실험 ID를 주면(`--exp 20251201-weave`) 모든 단계가 `outputs/experiments/<ID>/` 아래에 쓰고 `manifest.json`에 기록한다 ([산출물 규약](../docs/outputs.md)). 예: `python -m learning.train_bc --exp 20251201-weave --run mlp`, `python -m learning.evaluate mlp rule --exp 20251201-weave`.
+경로 대신 실험 ID를 주면(`--exp 20261201-weave`) 모든 단계가 `outputs/experiments/<ID>/` 아래에 쓰고 `manifest.json`에 기록한다 ([산출물 규약](../docs/outputs.md)). 예: `python -m learning.train_bc --exp 20261201-weave --run mlp`, `python -m learning.evaluate mlp rule --exp 20261201-weave`.
 
 비교용 명령: 시작 구간 스캔 없이 변환(`--no-prescan`), 학습 없는 규칙 기준선(`rule`, `rule-noprescan`), eval.json 여러 개를 표 하나로(`report_evals`).
 
@@ -81,10 +81,10 @@ python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
 
 ## 다음 단계
 
-- DAgger는 보류했다(사용자 결정). 지금 관측에서는 정책 출력이 다음 관측을 거의 바꾸지 않아([수량·섭동 비교](../docs/experiments/20251118-t-quantity-perturb.md)) 시뮬 DAgger로 얻을 것이 적다. 카메라 시야가 토치를 따라 움직이는 효과를 모델링하거나, 정책 출력에 따라 바뀌는 입력을 넣을 때 다시 본다.
+- DAgger는 보류했다(사용자 결정). 지금 관측에서는 정책 출력이 다음 관측을 거의 바꾸지 않아([수량·섭동 비교](../docs/experiments/20261118-t-quantity-perturb.md)) 시뮬 DAgger로 얻을 것이 적다. 카메라 시야가 토치를 따라 움직이는 효과를 모델링하거나, 정책 출력에 따라 바뀌는 입력을 넣을 때 다시 본다.
 - 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값 맞추기. 시작 구간 스캔 자세의 노이즈도 따로 잰다.
 - 이전 Isaac 기록은 `python -m sim_errors.resense`로 지금 센서 설정(스캔 포함)을 넣은 뒤 다시 변환한다.
 - 실제 depth 카메라로 V홈 시편 단면을 재서 판 윗면 단차 측정이 되는지 확인.
 - 코너·V홈·파이프 Isaac 1/5 묶음은 모두 통과했다(추종 95% 0.33–0.41 mm, sim_errors/README.md "Isaac 물리 검증"). 남은 것: 이 기록으로 학습·평가해 운동학 결과와 비교.
-- Isaac 정책 실행기로 공용 MLP의 Isaac 닫힌 루프를 잰다 ([20251125-isaac-policy](../docs/experiments/20251125-isaac-policy.md)). 이 실행기가 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집의 바탕이다.
+- Isaac 정책 실행기로 공용 MLP의 Isaac 닫힌 루프를 잰다 ([20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 이 실행기가 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집의 바탕이다.
 - 파이프의 다른 자세(관 아래쪽까지 5G 전체, 세운 관 2G).
