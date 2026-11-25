@@ -77,6 +77,16 @@ python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenari
   두 가지다. `--kin-eval`을 주면 같은 에피소드의 운동학 오차를 옆에 놓는다. 추종 95%(실측 팁과 목표 거리)와 뒤짐(이음매 방향으로
   실측이 명령보다 늦은 평균)도 낸다. `--report-only`는 Isaac 없이 저장된 에피소드로 요약만 다시 낸다.
 - 완벽 추종(실측 = 목표)이면 명령 오차가 운동학 닫힌 루프(`learning.evaluate`)와 똑같이 나온다 (`learning/test/test_policy_driver.py`).
+- 위빙 모드는 실측이 위빙을 조금 늦게 따라가 측정 좌우 오차에 위빙 주파수 흔들림이 남는다. 위빙 한 주기 평균한 **위빙 중심 좌우**도 낸다.
+
+**팔·토치–모재 간격 점검** (`clearance_check.py`): Isaac 장면의 모재는 표시 전용이라 충돌이 없다. 저장된 에피소드(`run_batch.py`,
+`policy_to_sim.py`)의 관절 실측으로 토치·팔 표면 점에서 모재 판까지 최소 거리를 재고, 음수(뚫음)를 알려 준다.
+팔·토치 모양은 장면의 표시 메시(`geometry/opti3_scene_points.npz`, `tools/extract_scene_points.py`로 `posco_torch.usd`에서 뽑음)이고,
+장면의 링크·tcp·토치 팁 좌표계는 `opti3.urdf`와 같다(관절 0에서 확인). 모재는 명목 단면이고 변형(mm 단위)은 넣지 않는다.
+
+```bat
+python sim_bridge\clearance_check.py outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac --follower-urdf C:\...\opti3.urdf
+```
 
 ## 확인 안 된 것
 

@@ -98,7 +98,8 @@ class PolicyDriver:
 
 def episode_metrics(rows: dict, scn: dict, start_zone_mm: float = 30.0) -> dict:
     """정책 실행 기록 → 닫힌 루프 오차. 키는 learning.evaluate.closed_loop과 같고(측정 기준), 명령 기준은 cmd_ 접두사.
-    track_p95_mm: 실측 팁과 보낸 목표 사이 거리 95%, lag_mm: 실측 팁이 이음매 방향으로 명령보다 뒤진 평균."""
+    track_p95_mm: 실측 팁과 보낸 목표 사이 거리 95%, lag_mm: 실측 팁이 이음매 방향으로 명령보다 뒤진 평균,
+    lateral_center: 위빙 한 주기 이동 평균한 측정 좌우 오차 RMS (위빙을 늦게 따라가 생기는 흔들림을 뺀 중심선 오차)."""
     model = PartErrorModel(scn)
     rule = ScriptedExpert(model, np.eye(4), mode=scn.get('episode', {}).get('mode', 'weave'), weld_only=True)
     weld = np.flatnonzero(np.asarray(rows['arc_on']).astype(bool))
@@ -122,7 +123,8 @@ def episode_metrics(rows: dict, scn: dict, start_zone_mm: float = 30.0) -> dict:
     pos = np.linalg.norm(np.asarray(rows['T_meas'])[weld, :3, 3] - np.asarray(rows['T_target'])[weld, :3, 3], axis=1) / MM
     out = {'done': bool(len(weld) and rows['done'][weld[-1]]),
            'time': float(rows['t'][weld[-1]] - rows['t'][weld[0]]) if len(weld) else 0.0,
-           'track_p95_mm': float(np.percentile(pos, 95)), 'lag_mm': float(np.mean(lag))}
+           'track_p95_mm': float(np.percentile(pos, 95)), 'lag_mm': float(np.mean(lag)),
+           'lateral_center': float(np.sqrt(np.mean(weave_center(meas[:, 0], rows, weld) ** 2)))}
     for j, n in enumerate(AXES):
         out[n] = float(np.sqrt(np.mean(meas[:, j] ** 2)))
         out[n + '_base'] = float(np.sqrt(np.mean(base[:, j] ** 2)))
@@ -136,6 +138,21 @@ def episode_metrics(rows: dict, scn: dict, start_zone_mm: float = 30.0) -> dict:
     out['height_sq_rest'] = float(np.sum(meas[~start, 1] ** 2))
     out['n_start'], out['n_rest'] = int(start.sum()), int((~start).sum())
     return out
+
+
+def weave_center(x: np.ndarray, rows: dict, weld: np.ndarray) -> np.ndarray:
+    """위빙 한 주기 이동 평균. 측정 좌우 오차에서 명령 위빙을 빼도 실측 위빙이 조금 늦게 따라가 위빙 주파수의 흔들림이 남는다.
+    이를 걷어 낸 중심선 좌우 오차 (직선 모드는 그대로)."""
+    hz = float(np.median(np.asarray(rows['weave_hz'])[weld])) if len(weld) else 0.0
+    t = np.asarray(rows['t'])[weld]
+    if hz <= 0 or len(t) < 3:
+        return x
+    n = int(round(1.0 / (hz * float(np.median(np.diff(t))))))
+    if n < 2 or n >= len(x):
+        return x
+    c = np.convolve(x, np.ones(n) / n, mode='valid')
+    pad = len(x) - len(c)
+    return np.pad(c, (pad // 2, pad - pad // 2), mode='edge')
 
 
 def as_cmd(row: dict) -> dict:

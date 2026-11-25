@@ -62,6 +62,7 @@ def test_perfect_tracking_matches_kinematic_closed_loop(scn):
 
 def test_target_matches_offset_and_tracking_lag_shows_up():
     scn = scenarios(('fillet_corner',))[0]
+    scn['episode']['mode'] = 'weave'
     rows = drive(RulePolicy('rule'), scn, lag=5)
     model = PartErrorModel(scn)
     for i in range(0, len(rows['s']), 50):          # 목표 = 추정 경로 + 보정 + 위빙
@@ -71,6 +72,7 @@ def test_target_matches_offset_and_tracking_lag_shows_up():
     m = episode_metrics(rows, scn)
     assert m['track_p95_mm'] > 0 and m['lag_mm'] > 0      # 늦게 따라가면 이음매 방향으로 뒤진다
     assert m['cmd_height'] <= m['height'] + 0.05
+    assert m['lateral_center'] < m['lateral']             # 늦게 따라간 위빙 흔들림을 걷어 낸 중심선 오차
 
 
 def test_driver_rejects_full_episode_scenario():

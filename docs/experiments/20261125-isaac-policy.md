@@ -27,8 +27,7 @@ Isaac 관절 추종 오차가 정책 관측과 결과에 들어가지 않았다.
 
 ```bat
 cd C:\workspace\Welding-Robot
-git fetch origin
-git checkout claude/project-thread-squds7
+git checkout main
 git pull
 conda activate weld
 set URDF=C:\workspace\indy-ros2-jazzy\indy_description\urdf_files\opti3.urdf
@@ -36,7 +35,12 @@ set K=outputs\experiments\20261123-kin-4fam
 set E=20261125-isaac-policy
 ```
 
-PR이 머지됐으면 `git checkout main` 후 `git pull`.
+처음 실행을 옛 ID(`20251125-isaac-policy`, 2026-11-25에 연도를 고치기 전)로 했으면 실행을 멈추고 폴더 이름을 바꾼 뒤 새 ID로 이어서 돌린다.
+바꾸기 전에 새 ID로 돌리면 빈 폴더에서 처음부터 시작한다.
+
+```bat
+ren outputs\experiments\20251125-isaac-policy 20261125-isaac-policy
+```
 
 운동학 에피소드(`%K%\episodes`)를 지웠으면 시나리오만 다시 만들어 `--scenarios %K%\batch`로 쓴다 (1분 미만, 시드 고정이라
 0bc9d6b 이후 시나리오 뽑는 코드가 안 바뀌어 같은 시나리오·같은 나눔이 나온다):
@@ -70,9 +74,16 @@ python sim_bridge\policy_to_sim.py --policy %K%\runs\mlp_all\policy.pt --scenari
 멈추면 같은 명령으로 이어서 한다. 끝에 시편군별 표(측정·명령·운동학)가 나오고 `outputs\experiments\20261125-isaac-policy\runs\mlp_all\isaac\eval_isaac.json`에 저장된다.
 먼저 짧게 보려면 `--per-family 5`를 붙인다(20개, 약 10분). 같은 폴더에 이어서 쌓이므로 그다음 전체 명령을 그대로 돌리면 된다.
 
-**3. (선택) 규칙 기준선을 Isaac에서:** `--policy rule --kin-eval %K%\runs\rule\eval.json`으로 같은 명령. 정책과 규칙의 차이가 Isaac에서도 그대로인지 본다.
+**3. 팔·토치–모재 간격 점검 (Isaac 불필요, 에피소드당 몇 초).** 모재는 충돌이 없어 뚫어도 시뮬레이션이 막지 않으므로 저장된 관절 실측으로 잰다.
+팔·토치 모양은 Isaac 장면의 표시 메시 그대로다 (`sim_bridge/clearance_check.py`).
 
-보내 줄 것: 1단계에서 본 것(이상하면 화면 캡처), 2단계 끝의 표(또는 `eval_isaac.json`, 작은 파일).
+```bat
+python sim_bridge\clearance_check.py outputs\experiments\%E%\runs\look\isaac outputs\experiments\%E%\runs\mlp_all\isaac --follower-urdf %URDF%
+```
+
+**4. (선택) 규칙 기준선을 Isaac에서:** `--policy rule --kin-eval %K%\runs\rule\eval.json`으로 같은 명령. 정책과 규칙의 차이가 Isaac에서도 그대로인지 본다.
+
+보내 줄 것: 2단계 끝의 표(또는 `eval_isaac.json`, 작은 파일), 3단계 끝의 간격 표.
 
 ## 판정
 

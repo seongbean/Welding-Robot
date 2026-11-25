@@ -148,6 +148,8 @@ def build_report(out: str, policy: str, kin_eval: str | None = None) -> dict:
              'track_p95_mm': float(np.median([r['track_p95_mm'] for r in sel])),
              'track_p95_max_mm': float(max(r['track_p95_mm'] for r in sel)),
              'lag_mm': float(np.mean([r['lag_mm'] for r in sel])),
+             'lateral_center': (float(np.sqrt(np.mean([r['lateral_center'] ** 2 for r in sel])))
+                                if all('lateral_center' in r for r in sel) else float('nan')),
              'ik_not_ok': float(np.mean([r['ik_not_ok'] for r in sel]))}
         same = [kin[os.path.splitext(r['file'])[0]] for r in sel if os.path.splitext(r['file'])[0] in kin]
         if same:
@@ -172,9 +174,9 @@ def print_report(res: dict) -> None:
     for name, why in (res.get('skipped') or {}).items():
         print(f'  시작 못 함 {name}: {why}')
     print('RMS 좌우·높이 mm, 작업각·진행각 deg. 측정 = 실측 토치, 명령 = 정책 보정, 운동학 = 같은 에피소드 운동학 평가,'
-          ' 괄호 = 보정 0 대비 개선율')
+          ' 괄호 = 보정 0 대비 개선율, 위빙 중심 좌우 = 위빙 한 주기 평균한 측정 좌우 (늦게 따라간 위빙 흔들림 뺌)')
     head = (f'{"묶음":<26}{"개수":>4}{"완료":>6}' + ''.join(f'{n:>16}' for n in ('좌우', '높이', '작업각', '진행각'))
-            + f'{"추종95% mm":>11}{"뒤짐 mm":>8}')
+            + f'{"위빙 중심 좌우":>13}{"추종95% mm":>11}{"뒤짐 mm":>8}')
     print(head)
     for name, g in res['groups'].items():
         if name != 'all' and not name.startswith('fam_'):
@@ -188,7 +190,8 @@ def print_report(res: dict) -> None:
                 continue
             cells = ''.join(f'{v[n]:>8.2f}' + (f' ({v[n + "_gain"] * 100:+4.0f}%)' if math.isfinite(v[n + '_gain'])
                                                 else '  (  - )') for n in AXES)
-            tail = f'{g["track_p95_mm"]:>11.2f}{g["lag_mm"]:>8.2f}' if src == 'isaac' else ''
+            tail = (f'{g["lateral_center"]:>13.2f}{g["track_p95_mm"]:>11.2f}{g["lag_mm"]:>8.2f}'
+                    if src == 'isaac' else '')
             print(f'{(label + " " + tag):<26}{v["n"]:>4}{v["done"] * 100:>5.0f}%{cells}{tail}')
 
 
