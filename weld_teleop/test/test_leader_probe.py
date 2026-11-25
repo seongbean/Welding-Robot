@@ -1,4 +1,4 @@
-"""leader_probe.py: 하드웨어 없이 스텁 패킷 핸들러로 스캔/변환 로직 검증."""
+"""tools/leader_probe.py: 하드웨어 없이 스텁 패킷 핸들러로 스캔/변환 로직 검증."""
 import leader_probe as lp
 
 

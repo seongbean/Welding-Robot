@@ -76,7 +76,7 @@ def test_xyzquat_roundtrip():
 
 
 def test_matches_independent_numpy_fk():
-    # so102_urdf_check.py의 numpy FK(URDF 직접 파싱)와 pinocchio FK가 같은 TCP 위치를 내야 한다
+    # tools/so102_urdf_check.py의 numpy FK(URDF 직접 파싱)와 pinocchio FK가 같은 TCP 위치를 내야 한다
     import so102_urdf_check as chk
     u = chk.Urdf(SO102_URDF)
     k = ChainKinematics(SO102_URDF, ARM, EE)

@@ -12,6 +12,12 @@
   옛 이름 `exp`, `exp_isaac`, `github-evals`는 `outputs/` 아래로 가는 임시 정션입니다.
 - 산출물(.npz, .pt, .parquet, 에피소드, 데이터셋)은 커밋하지 않습니다.
 
+## 문서
+
+- 실험 결과는 `docs/experiments/<실험 ID>.md` 새 파일에 적고 `docs/experiments/README.md` 표 맨 위에 한 줄을 더합니다.
+  ID는 산출물 폴더 `outputs/experiments/<ID>/`와 같게 합니다. `learning/README.md`에는 사용법만 둡니다.
+- 설계는 `docs/architecture.md`, 대안과 이유는 `docs/design-decisions.md`.
+
 ## 자산
 
 - Isaac 장면은 `assets/isaac/opti3_welding_scene/` (USD끼리 상대경로로 참조하므로 폴더 구조를 바꾸지 않음).

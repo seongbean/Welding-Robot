@@ -4,9 +4,9 @@
 ROS2 없이 실행 (Windows/Linux). 필요: pip install feetech-servo-sdk
 
 사용법
-  python leader_probe.py --port COM5 scan          # 응답하는 서보 ID와 현재 위치
-  python leader_probe.py --port COM5 watch         # 실시간 값. 관절을 하나씩 움직여 ID↔관절 대응 확인
-  python leader_probe.py --port COM5 snapshot      # 지금 자세의 tick 값을 config용 offsets 줄로 출력
+  python tools/leader_probe.py --port COM5 scan          # 응답하는 서보 ID와 현재 위치
+  python tools/leader_probe.py --port COM5 watch         # 실시간 값. 관절을 하나씩 움직여 ID↔관절 대응 확인
+  python tools/leader_probe.py --port COM5 snapshot      # 지금 자세의 tick 값을 config용 offsets 줄로 출력
   (Linux 포트 예: /dev/ttyACM0)
 
 STS3215 기준: 1회전 = 4096 tick, 중앙 = 2048. watch/snapshot의 각도는 (tick - 2048) 기준이며
