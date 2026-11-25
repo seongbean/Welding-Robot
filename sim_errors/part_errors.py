@@ -684,10 +684,10 @@ class PartErrorModel:
         Rw, tw = self.T_place[:3, :3], self.T_place[:3, 3]
         return out @ Rw.T + tw
 
-    def nominal_meshes(self, nx: int = 60):
-        """바닥 판·웹 판의 명목 메시. 반환: (꼭짓점 (n,3), 판 번호 (n,), 면 꼭짓점 수, 면 인덱스)."""
+    def sections(self) -> tuple[list[tuple[int, list[tuple[float, float]]]], tuple[float, float]]:
+        """명목 모재 단면: ([(판 번호, 볼록 다각형 (y, z) 꼭짓점)], 이음매 방향 x 범위). 평평한 좌표(파이프는 감기 전).
+        파이프는 관 둘레 전체라 x 범위가 한 바퀴다."""
         g = self.scn['geometry']
-        xs = np.linspace(0.0, self.L, nx + 1)
         if self.butt:   # 맞대기 V홈: 왼쪽·오른쪽 판, 루트 끝 (0, 0)에 꼭짓점 (틈새는 deform_points에서 벌림)
             W, f, h = g['plate_width'], g['root_face'], g['thickness'] - g['root_face']
             a = h * math.tan(g['bevel'])
@@ -695,15 +695,20 @@ class PartErrorModel:
                         (WEB, [(0, -f), (W, -f), (W, h), (a, h), (0, 0)])]
             if self.pipe:   # 관 둘레 전체 (용접 구간 밖은 deform_points에서 오차를 양 끝 값으로 둠)
                 half = math.pi * g['radius']
-                xs = np.linspace(self.L / 2 - half, self.L / 2 + half, 4 * nx + 1)
+                return sections, (self.L / 2 - half, self.L / 2 + half)
+            return sections, (0.0, self.L)
+        W, tb, H, tw = g['base_width'], g['base_thickness'], g['web_height'], g['web_thickness']
+        # 단면 (y, z) 다각형. 바닥 판은 y=0에 꼭짓점을 둬서 각변형 꺾임이 생기게 함
+        if g.get('joint', 'fillet_t') == 'fillet_corner':   # ㄱ자: 바닥 판은 토치 쪽 날개 + 웹 밑까지
+            base = [(-W, -tb), (0, -tb), (tw, -tb), (tw, 0), (0, 0), (-W, 0)]
         else:
-            W, tb, H, tw = g['base_width'], g['base_thickness'], g['web_height'], g['web_thickness']
-            # 단면 (y, z) 다각형. 바닥 판은 y=0에 꼭짓점을 둬서 각변형 꺾임이 생기게 함
-            if g.get('joint', 'fillet_t') == 'fillet_corner':   # ㄱ자: 바닥 판은 토치 쪽 날개 + 웹 밑까지
-                base = [(-W, -tb), (0, -tb), (tw, -tb), (tw, 0), (0, 0), (-W, 0)]
-            else:
-                base = [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]
-            sections = [(BASE, base), (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])]
+            base = [(-W / 2, -tb), (0, -tb), (W / 2, -tb), (W / 2, 0), (0, 0), (-W / 2, 0)]
+        return [(BASE, base), (WEB, [(0, 0), (tw, 0), (tw, H), (0, H)])], (0.0, self.L)
+
+    def nominal_meshes(self, nx: int = 60):
+        """바닥 판·웹 판의 명목 메시. 반환: (꼭짓점 (n,3), 판 번호 (n,), 면 꼭짓점 수, 면 인덱스)."""
+        sections, (x0, x1) = self.sections()
+        xs = np.linspace(x0, x1, (4 * nx if self.pipe else nx) + 1)
         pts, plate, counts, idx = [], [], [], []
         nx = len(xs) - 1
         for pid, sec in sections:

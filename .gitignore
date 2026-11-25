@@ -30,4 +30,6 @@ weld_teleop/opti3_welding_scene/
 # 소스 폴더에 큰 산출물이 실수로 들어가지 않게
 *.pt
 *.npz
+# 예외: Isaac 장면에서 뽑은 팔·토치 표면 점 (tools/extract_scene_points.py, 자산)
+!sim_bridge/geometry/opti3_scene_points.npz
 *.parquet
