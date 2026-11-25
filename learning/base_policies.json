@@ -1,0 +1,13 @@
+{
+ "_doc": "고정한 기본 정책 목록 (docs/policies.md). 실행기(sim_bridge/shared_to_sim.py)가 정책 파일 sha256으로 이름을 찾아 기록하고, --base-tag를 주면 해시가 다를 때 멈춘다.",
+ "base-v1": {
+  "sha256": "39a8e9c6e3add5ffdf9cc7d11bb931feb2c38988130e5eeed5a378f51e814ae7",
+  "source": "outputs/experiments/20261123-kin-4fam/runs/mlp_all/policy.pt",
+  "model": "mlp_all (MLP, 4개 시편군 운동학 학습, 관측 section,profile,progress,mode)",
+  "release": {
+   "tag": "base-policy-v1",
+   "asset": "policy.pt",
+   "url": "https://github.com/seongbean/Welding-Robot/releases/tag/base-policy-v1"
+  }
+ }
+}
