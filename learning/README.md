@@ -29,48 +29,56 @@
 
 저장소 루트에서. 학습·변환은 `pip install torch "lerobot[dataset]"` (lerobot은 Python 3.12 이상, conda `weld` 환경에서 됨). lerobot이 없으면 `frames.npz`만 만든다.
 
+실험 ID를 주면(`--exp`) 모든 단계가 `outputs/experiments/<ID>/` 아래에 쓰고 `manifest.json`에 기록한다 ([산출물 규약](../docs/outputs.md)).
+ID는 시작한 날짜 `YYYYMMDD-<이름>`. 경로를 따로 주면(`--out`, `--data` 등) 그 경로가 우선한다.
+
 ```bat
-python -m sim_errors.make_scenarios --batch --scale 0.2 --out batches\t_small
-python sim_bridge\run_batch.py batches\t_small --out episodes\t_small --follower-urdf C:\...\opti3.urdf
-python -m learning.to_lerobot episodes\t_small --out datasets\t_small
-python -m learning.train_bc datasets\t_small --model mlp --out runs\mlp
-python -m learning.train_bc datasets\t_small --model mlp --obs section,progress,mode --out runs\mlp_noprofile
-python -m learning.train_bc datasets\t_small --model gru --out runs\gru
-python -m learning.evaluate runs\mlp\policy.pt runs\mlp_noprofile\policy.pt runs\gru\policy.pt --data datasets\t_small --episodes episodes\t_small
+set E=20261201-weave
+python -m sim_errors.make_scenarios --batch --scale 0.2 --exp %E%
+python sim_bridge\run_batch.py --exp %E% --kinematic --jobs 4
+python -m learning.to_lerobot --exp %E%
+python -m learning.train_bc --exp %E% --run mlp --model mlp
+python -m learning.train_bc --exp %E% --run mlp_noprofile --model mlp --obs section,progress,mode
+python -m learning.train_bc --exp %E% --run gru --model gru
+python -m learning.evaluate mlp mlp_noprofile gru rule --exp %E% --jobs 4
 ```
 
-Isaac 없이 전체 흐름만 볼 때는 두 번째 줄을 `--kinematic --jobs 4`(완벽 추종 가정)로 바꾼다.
-
-경로 대신 실험 ID를 주면(`--exp 20261201-weave`) 모든 단계가 `outputs/experiments/<ID>/` 아래에 쓰고 `manifest.json`에 기록한다 ([산출물 규약](../docs/outputs.md)). 예: `python -m learning.train_bc --exp 20261201-weave --run mlp`, `python -m learning.evaluate mlp rule --exp 20261201-weave`.
+두 번째 줄의 `--kinematic`은 Isaac 없이 완벽 추종을 가정한다. Isaac 기록은 `--kinematic` 대신 `--follower-urdf C:\...\opti3.urdf`를 주고
+(`--group <군>`이면 `episodes_isaac/<군>/`에 씀, [sim_errors/README.md](../sim_errors/README.md) "Isaac 물리 검증"), 변환에 그 폴더를 준다
+(`python -m learning.to_lerobot outputs\experiments\%E%\episodes_isaac\all --exp %E% --out outputs\experiments\%E%\data_isaac`).
 
 비교용 명령: 시작 구간 스캔 없이 변환(`--no-prescan`), 학습 없는 규칙 기준선(`rule`, `rule-noprescan`), eval.json 여러 개를 표 하나로(`report_evals`).
 
 ```bat
-python -m learning.to_lerobot episodes\t_small --out datasets\t_small_noscan --no-prescan
-python -m learning.evaluate rule rule-noprescan --data datasets\t_small --episodes episodes\t_small --rule-dir runs
-python -m learning.report_evals runs\mlp\eval.json runs\rule\eval.json runs\rule-noprescan\eval.json
+set X=outputs\experiments\%E%
+python -m learning.to_lerobot --exp %E% --out %X%\data_noscan --no-prescan
+python -m learning.evaluate rule rule-noprescan --exp %E%
+python -m learning.report_evals %X%\runs\mlp\eval.json %X%\runs\rule\eval.json %X%\runs\rule-noprescan\eval.json
 ```
 
-### 시편군 (T 필릿 + ㄱ자 코너 필릿)
+### 시편군 (T 필릿, ㄱ자 코너 필릿, 맞대기 V홈, 파이프 원주)
 
-시편군마다 묶음을 만들고 에피소드 폴더 여러 개를 한 데이터로 합친다. 에피소드마다 시편군(`ep_family`)이 기록되어,
+시편군마다 `--family`로 묶음을 만들면 같은 `batch/`에 접두사(`corner_`, `butt_`, `pipe_`)를 달고 들어간다. 에피소드마다 시편군(`ep_family`)이 기록되어,
 학습(`train_bc --family`)과 평가(`evaluate --family`)를 군별로 나눌 수 있다. 섞인 시험을 평가하면 표에 군별 줄
-(`fam_fillet_t`, `fam_fillet_corner`, `fam_<군>_<강도>`)이 더해진다.
+(`fam_fillet_t`, `fam_fillet_corner`, `fam_butt_v`, `fam_pipe_girth`, `fam_<군>_<강도>`)이 더해진다.
 
 ```bat
-python -m sim_errors.make_scenarios --batch --family fillet_corner --out batches\corner
-python sim_bridge\run_batch.py batches\corner --out episodes\corner --follower-urdf C:\...\opti3.urdf
-python -m learning.to_lerobot episodes\t episodes\corner --out datasets\t_corner
-python -m learning.train_bc datasets\t_corner --family fillet_t --out runs\mlp_t
-python -m learning.train_bc datasets\t_corner --out runs\mlp_both
-python -m learning.evaluate runs\mlp_t\policy.pt runs\mlp_both\policy.pt --data datasets\t_corner --episodes episodes\t episodes\corner
-python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
+for %f in (fillet_t fillet_corner butt_v pipe_girth) do python -m sim_errors.make_scenarios --batch --family %f --exp %E%
+python sim_bridge\run_batch.py --exp %E% --kinematic --jobs 8
+python -m learning.to_lerobot --exp %E% --no-lerobot
+python -m learning.train_bc --exp %E% --run mlp_all
+python -m learning.train_bc --exp %E% --run mlp_pipe --family pipe_girth
+python -m learning.evaluate mlp_all mlp_pipe rule --exp %E% --jobs 8
+python -m learning.report_evals outputs\experiments\%E%\runs\*\eval.json --kind fam_pipe_girth
 ```
 
-사양 수량 생성부터 평가까지는 GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)를 Run workflow로 돌린다. 지금 실험은 T 330 + 코너 335 운동학 에피소드로 MLP/GRU를 T만·코너만·둘 다로 학습해 두 군 시험에서 본다. 러너 시간을 많이 써서 push로는 돌지 않는다. 결과는 실행 요약의 표와 `eval-*` 아티팩트.
+네 군 비교 실험(변환 → mlp_all, mlp_3, mlp_pipe, mlp_all_q, gru_all 학습 → 규칙 포함 평가 → `report.md`)은
+`python -m learning.run_experiment --exp %E% --jobs 8` 한 줄로 돈다. 단계마다 결과가 있으면 건너뛰므로 멈춘 뒤 같은 명령으로 이어진다.
+GitHub Actions의 "Experiment" 워크플로(`.github/workflows/experiment.yml`)도 같은 실험을 하지만, 2026-11-23에 Actions 예산이
+떨어진 뒤로는 사용자 PC에서 `run_experiment`로 돌린다.
 
 - 나눔은 시나리오의 `episode.split`(에피소드 단위 학습 80 · 검증 10 · 시험 10, 가혹은 모두 시험).
-- 평가 결과는 `<정책 폴더>/eval.json`(`--name X`면 `eval_X.json`, 규칙 기준선은 `<rule-dir>/rule/eval.json`), 학습 곡선은 `train_log.json`.
+- 평가 결과는 `runs/<정책>/eval.json`(`--name X`면 `eval_X.json`, 규칙 기준선은 `runs/rule/eval.json`), 학습 곡선은 `train_log.json`.
 - 높이 오차는 시작 30 mm와 나머지로도 나눠 나온다. 시작 구간 스캔으로 학습한 정책(`policy.pt`의 `prescan`)은 닫힌 루프에서도 스캔을 넣는다.
 - 닫힌 루프 평가는 로봇이 명령을 바로 따라간다고 가정한다. Isaac 추종 오차는 들어가지 않는다.
   Isaac에서 정책이 직접 opti3를 모는 닫힌 루프는 `sim_bridge/policy_to_sim.py` ([sim_bridge/README.md](../sim_bridge/README.md) "학습 정책으로 몰기").
@@ -81,10 +89,9 @@ python -m learning.report_evals runs\*\eval.json --kind fam_fillet_corner
 
 ## 다음 단계
 
-- DAgger는 보류했다(사용자 결정). 지금 관측에서는 정책 출력이 다음 관측을 거의 바꾸지 않아([수량·섭동 비교](../docs/experiments/20261118-t-quantity-perturb.md)) 시뮬 DAgger로 얻을 것이 적다. 카메라 시야가 토치를 따라 움직이는 효과를 모델링하거나, 정책 출력에 따라 바뀌는 입력을 넣을 때 다시 본다.
-- 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값 맞추기. 시작 구간 스캔 자세의 노이즈도 따로 잰다.
+- DAgger는 보류했다(사용자 결정). 지금 관측에서는 정책 출력이 다음 관측을 거의 바꾸지 않아([수량·섭동 비교](../docs/experiments/20261118-t-quantity-perturb.md)) 시뮬 DAgger로 얻을 것이 적다. Isaac 닫힌 루프에서도 명령 오차가 운동학과 같았다([20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 카메라 시야가 토치를 따라 움직이는 효과를 모델링하거나, 정책 출력에 따라 바뀌는 입력을 넣을 때 다시 본다.
+- 실제 depth 카메라로 시연 시편 단면을 재서 점 노이즈·측정 구멍 값을 맞추고, V홈에서 판 윗면 단차 측정이 되는지 확인한다. 시작 구간 스캔 자세의 노이즈도 따로 잰다.
 - 이전 Isaac 기록은 `python -m sim_errors.resense`로 지금 센서 설정(스캔 포함)을 넣은 뒤 다시 변환한다.
-- 실제 depth 카메라로 V홈 시편 단면을 재서 판 윗면 단차 측정이 되는지 확인.
-- 코너·V홈·파이프 Isaac 1/5 묶음은 모두 통과했다(추종 95% 0.33–0.41 mm, sim_errors/README.md "Isaac 물리 검증"). 남은 것: 이 기록으로 학습·평가해 운동학 결과와 비교.
-- Isaac 정책 실행기로 공용 MLP의 Isaac 닫힌 루프를 잰다 ([20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 이 실행기가 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집의 바탕이다.
+- Isaac 기록(코너·V홈·파이프 1/5 묶음, [20261124-isaac-4fam](../docs/experiments/20261124-isaac-4fam.md))으로 학습·평가해 운동학 결과와 비교.
+- 공용 MLP의 Isaac 닫힌 루프는 끝났다(시험 240개 모두 완료, 명령 오차 = 운동학, 뚫음 없음, [20261125-isaac-policy](../docs/experiments/20261125-isaac-policy.md)). 남은 것: 같은 실행기로 규칙 기준선, 그 위에 공유 제어(정책 구동 중 리더 암 보정)와 개입 데이터 수집.
 - 파이프의 다른 자세(관 아래쪽까지 5G 전체, 세운 관 2G).

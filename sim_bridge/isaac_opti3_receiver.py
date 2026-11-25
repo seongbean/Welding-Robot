@@ -1,6 +1,6 @@
 """Isaac Sim 쪽: UDP로 받은 관절 목표를 opti3(/World/indy)에 넣고 실측 관절값을 돌려보낸다.
 
-Isaac Sim 5.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으로 실행한다(추가 설치 없음).
+Isaac Sim 6.1 standalone 스크립트. Isaac Sim에 들어 있는 파이썬으로 실행한다(추가 설치 없음).
   C:\\isaacsim\\python.bat sim_bridge\\isaac_opti3_receiver.py
   (장면 기본값: assets/isaac/opti3_welding_scene/posco_torch.usd. 다른 장면은 --usd로)
 
